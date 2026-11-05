@@ -109,10 +109,19 @@ def evidence_faithfulness(rows: List[Dict], resume_text: str) -> float:
         return float("nan")
     pool = _norm(resume_text)
 
+    pool_tokens = set(pool.split())
+
     def ok(ev: str) -> bool:
         frags = [_norm(f) for f in re.split(r"\.{3}|\u2026", ev or "")]
         frags = [f for f in frags if len(f) >= 4]
-        return bool(frags) and all(f in pool for f in frags)
+        if not frags:
+            return False
+        if all(f in pool for f in frags):
+            return True
+        # Judges often drop list items without marking it. That is condensing, not fabricating: accept when
+        # (almost) every word of the quote exists in the resume. Invented claims fail this.
+        toks = [t for t in " ".join(frags).split() if len(t) > 2]
+        return bool(toks) and sum(t in pool_tokens for t in toks) / len(toks) >= 0.9
 
     return mean(1.0 if ok(r.get("evidence", "")) else 0.0 for r in strong)
 

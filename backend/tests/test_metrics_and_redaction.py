@@ -61,3 +61,10 @@ def test_faithfulness_accepts_stitched_fragments_but_not_invented_ones():
     ok = [{"match": "strong", "evidence": "Built a RAG screener in Python ... Docker, pytest"}]
     bad = [{"match": "strong", "evidence": "Built a RAG screener in Python ... led 40 engineers at Google"}]
     assert mt.evidence_faithfulness(ok, cv) == 1.0 and mt.evidence_faithfulness(bad, cv) == 0.0
+
+
+def test_faithfulness_accepts_condensed_lists_but_not_invented_claims():
+    cv = "Relevant coursework: Database Management, Deep Learning, AI/ML, OOPs, NLP. Skills: LangChain, pgvector, AWS."
+    condensed = [{"match": "strong", "evidence": "coursework: Deep Learning, AI/ML, NLP"}]
+    invented = [{"match": "strong", "evidence": "Led a Kubernetes migration for 40 engineers"}]
+    assert mt.evidence_faithfulness(condensed, cv) == 1.0 and mt.evidence_faithfulness(invented, cv) == 0.0
