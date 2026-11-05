@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --page-bg: #EBE8E3;
+  --card-bg: #FAF9F6;
+  --text-main: #292524;
+  --text-muted: #78716C;
+  --primary: #E06F4F;
+  --primary-hover: #C95D3F;
+  --dark-accent: #1C1917;
+  --ui-element: #E5E0DC;
+  --success: #4A7C59;
+  --warning: #D97706;
+  --danger: #DC2626;
+}
+
+body {
+  margin: 0;
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--page-bg);
+  color: var(--text-main);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(120, 113, 108, 0.2);
+  border-radius: 20px;
+}
+
+/* Glass panel effect */
+.glass-panel {
+  background: rgba(250, 249, 246, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Selection colors */
+::selection {
+  background-color: rgba(224, 111, 79, 0.2);
+  color: var(--primary);
+}
+
+/* Material Icons */
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+/* Nav item styles */
+.nav-item {
+  @apply flex items-center gap-4 px-4 py-3.5 rounded-2xl text-[#78716C] hover:text-[#292524] hover:bg-black/5 transition-all font-semibold text-sm;
+}
+
+.nav-item.active {
+  @apply bg-[#1C1917] text-white hover:bg-[#1C1917]/90 shadow-lg;
+  box-shadow: 0 10px 15px -3px rgba(28, 25, 23, 0.2);
+}
+
+/* Input field styles */
+.input-field {
+  @apply bg-white border-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#E06F4F]/20 placeholder:text-[#78716C]/50 rounded-xl transition-all;
+}
+
+/* Shadows */
+.shadow-soft {
+  box-shadow: 0 20px 40px -12px rgba(44, 39, 36, 0.06);
+}
+
+.shadow-inner-light {
+  box-shadow: inset 0 2px 4px 0 rgba(255, 255, 255, 0.6);
+}
+
+.shadow-floating {
+  box-shadow: 0 10px 30px -5px rgba(28, 25, 23, 0.15);
+}
+
+.shadow-sidebar {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
