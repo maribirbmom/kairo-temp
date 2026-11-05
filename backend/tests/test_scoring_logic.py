@@ -203,3 +203,39 @@ def test_experience_years_from_dated_experience_only():
     assert scoring.estimate_experience_years("EXPERIENCE\nAI/ML Intern, Jan 2025 - Jun 2025\nEDUCATION\n2022 - 2026") == 0.5
     overlap = "EXPERIENCE\nA 2020 - 2022\nB 2021 - 2023\nSKILLS\n"
     assert scoring.estimate_experience_years(overlap) == 3.0
+
+
+def run_scores(monkeypatch, scores):
+    calls = {"n": 0}
+    base = dict(P2)
+
+    async def fake_json(client, system, user, required=()):
+        if "JD-reading pass" in system:
+            return P1
+        out = dict(base, global_score=scores[min(calls["n"], len(scores) - 1)])
+        calls["n"] += 1
+        return out
+
+    monkeypatch.setattr(scoring, "_client", lambda: object())
+    monkeypatch.setattr(scoring, "_generate_json", fake_json)
+    monkeypatch.setattr(scoring, "_embed", fake_embed)
+    scoring._cache.clear()
+    return asyncio.run(scoring.screen(JD, CV, "x", owner="t", mode="full")), calls
+
+
+def test_borderline_score_gets_second_run_and_stable_pair_is_averaged(monkeypatch):
+    res, calls = run_scores(monkeypatch, [4.2, 4.3])
+    assert calls["n"] == 2 and res["score_runs"] == [4.2, 4.3] and not res["unstable"]
+    assert res["decision"] == "Apply" and res["score_range"] == [4.2, 4.3]
+
+
+def test_disagreeing_runs_downgrade_to_research_first_with_low_confidence(monkeypatch):
+    res, calls = run_scores(monkeypatch, [4.3, 3.7])
+    assert res["unstable"] and res["confidence"] == "low"
+    assert res["decision"] == "Research first" and res["score"] == 4.0 and res["score_range"] == [3.7, 4.3]
+
+
+def test_clear_scores_cost_one_call(monkeypatch):
+    for sc in (4.8, 2.1):
+        res, calls = run_scores(monkeypatch, [sc])
+        assert calls["n"] == 1 and res["score_range"] == [sc, sc]

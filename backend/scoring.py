@@ -42,7 +42,7 @@ load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
 
 APPLY_THRESHOLD = 4.0
-ENGINE_VERSION = "careerops-v7"
+ENGINE_VERSION = "careerops-v8"
 LLM_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "")  # low|medium|high; empty = provider default
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
@@ -52,6 +52,8 @@ MAX_RESUME_CHARS = 15000
 TOP_K = int(os.environ.get("TOP_K", "3"))
 SIM_FLOOR = float(os.environ.get("SIM_FLOOR", "0.30"))  # swept by evals/run_eval.py
 EVIDENCE_MODE = os.environ.get("KAIRO_EVIDENCE_MODE", "full")  # "full" = whole resume (career-ops), "rag" = retrieved chunks
+BORDERLINE = (3.6, 4.4)   # scores in this band get a second judge pass
+DISAGREE_AT = 0.3          # runs further apart than this are reported as unstable, not averaged away
 ROW_BUDGET = 12  # career-ops: at most 12 rows; critical/high always retained
 
 BANDS = ["critical", "high", "meaningful", "preferred", "low_signal"]
@@ -428,7 +430,11 @@ def confidence_tier(score_evidence: Dict[str, str], jd_ok: bool) -> str:
     return "high"
 
 
-def decide(score: float, confidence: str, hard_stops: List[str]) -> Dict[str, str]:
+def decide(score: float, confidence: str, hard_stops: List[str], unstable: bool = False) -> Dict[str, str]:
+    if unstable and score >= 3.5:
+        # Two judge runs disagreed: do not issue a confident Apply/Consider. Wrongly saying "skip" is the costly error.
+        return {"decision": "Research first", "verdict": "skip",
+                "label": "The two evaluation runs disagreed, check the open gaps before deciding"}
     if score >= 4.0 and not hard_stops:
         decision = "Apply"
     elif score >= 4.0 and hard_stops:
@@ -533,8 +539,16 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
     }
     if mode == "full":
         payload["resume"] = cv
-    p2 = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload),
-                              ("matches", "global_score", "dimensions", "score_evidence"))
+    required2 = ("matches", "global_score", "dimensions", "score_evidence")
+    p2 = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload), required2)
+    score_runs = [round(float(p2["global_score"]), 1)]
+    if BORDERLINE[0] <= score_runs[0] <= BORDERLINE[1]:  # the band where a wrong call matters most
+        try:
+            p2b = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload), required2)
+            score_runs.append(round(float(p2b["global_score"]), 1))
+        except Exception as e:
+            logger.warning(f"second judge run failed: {e}")
+    unstable = len(score_runs) > 1 and max(score_runs) - min(score_runs) > DISAGREE_AT
     by_id = {m.get("id"): m for m in p2.get("matches", []) if isinstance(m, dict)}
     if trace is not None:
         trace.update({"pass1_rows": rows, "snippets": snippets, "pass2": p2})
@@ -579,14 +593,19 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
     score_evidence = {k: (se_raw.get(k) if se_raw.get(k) in ("supported", "partial", "unknown") else "unknown")
                       for k in ("cv_match", "north_star", "red_flags")}
     confidence = confidence_tier(score_evidence, jd_ok=len(jd.split()) >= 40)
+    if unstable:
+        confidence = "low"
     # Holistic score from the model. Only clamped, never formula-capped (career-ops: confidence never changes the score).
-    score = round(float(p2["global_score"]), 1)  # validated 1-5 by _generate_json; never defaulted
+    score = round(sum(score_runs) / len(score_runs), 1)  # each run validated 1-5 by _generate_json; never defaulted
 
     checklist = [CHECKLIST_BASE] + [f"Check the posting yourself: {r['text']}" for r in logistics]
     result = {
         "score": score,
         "confidence": confidence,
         "score_evidence": score_evidence,
+        "score_runs": score_runs,
+        "score_range": [min(score_runs), max(score_runs)],
+        "unstable": unstable,
         "confidence_gaps": [g for g in p2.get("confidence_gaps", []) if isinstance(g, str)][:3],
         "dimensions": p2.get("dimensions", {}),
         "not_assessed": ["compensation", "culture"],
@@ -600,7 +619,7 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         "summary": p2.get("summary", ""),
         "next_action": p2.get("next_action", ""),
         "engine": f"{mode}-{ENGINE_VERSION}", "evidence_mode": mode,
-        **decide(score, confidence, hard_stops),
+        **decide(score, confidence, hard_stops, unstable),
     }
     _cache[key] = (owner, result)
     return result
