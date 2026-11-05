@@ -42,10 +42,11 @@ def load_cases(paths):
     return cases
 
 
-async def run_once(c, resume_text, salt, trace=None, retries=4):
+async def run_once(c, resume_text, salt, trace=None, retries=4, mode=None):
     for attempt in range(retries):
         try:
-            return await scoring.screen(c["jd"], resume_text, c.get("title", ""), owner=f"eval-{salt}", trace=trace)
+            return await scoring.screen(c["jd"], resume_text, c.get("title", ""), owner=f"eval-{salt}", trace=trace, mode=mode,
+                                        target_roles=c.get("target_roles", ""))
         except Exception as e:  # free-tier 429s: back off, never fall back silently
             if attempt == retries - 1:
                 raise
@@ -61,6 +62,8 @@ async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", nargs="+", required=True)
     ap.add_argument("--repeats", type=int, default=2)
+    ap.add_argument("--modes", nargs="+", default=["full", "rag"], choices=["full", "rag"],
+                    help="evidence modes to compare on the same cases")
     ap.add_argument("--metamorphic", action="store_true")
     ap.add_argument("--trace", action="store_true")
     a = ap.parse_args()
@@ -68,18 +71,19 @@ async def main():
     OUT.mkdir(exist_ok=True)
     report, lines = [], ["# Kairo evaluation\n", f"engine `{scoring.ENGINE_VERSION}` model `{scoring.LLM_MODEL}` "
                          f"TOP_K={scoring.TOP_K} SIM_FLOOR={scoring.SIM_FLOOR}\n"]
-    pairs_s, pairs_d = [], []
-    for c in load_cases(a.cases):
+    agg = {m: ([], []) for m in a.modes}
+    for mode, c in [(m, c) for c in load_cases(a.cases) for m in a.modes]:
+        pairs_s, pairs_d = agg[mode]
         red, counts = redact(c["resume"], nlp)
         tr = {} if a.trace else None
         runs = []
         for k in range(a.repeats):
-            runs.append(await run_once(c, red, f"{c['id']}-{k}", trace=tr if k == 0 else None))
+            runs.append(await run_once(c, red, f"{c['id']}-{mode}-{k}", trace=tr if k == 0 else None, mode=mode))
         base = runs[0]
         ref = c.get("reference", {})
         st = mt.stability([r["score"] for r in runs])
         rm = mt.requirement_metrics(base["requirements"], ref.get("requirements", [])) if ref else {}
-        row = {"id": c["id"], "score": base["score"], "decision": base["decision"], "engine": base["engine"],
+        row = {"id": c["id"], "mode": mode, "score": base["score"], "decision": base["decision"], "engine": base["engine"],
                "confidence": base["confidence"], "stability": st, "faithfulness": mt.evidence_faithfulness(base["requirements"], red),
                "reference": ref.get("score"), "ref_decision": ref.get("decision"), "requirements": rm,
                "redacted": counts}
@@ -87,8 +91,8 @@ async def main():
             pairs_s.append((base["score"], ref["score"]))
             pairs_d.append((base["decision"], ref["decision"]))
         if a.metamorphic:
-            shuf = await run_once(c, mm.shuffle_sections(red), f"{c['id']}-shuf")
-            pii = await run_once(c, redact(mm.inject_pii(c["resume"]), nlp)[0], f"{c['id']}-pii")
+            shuf = await run_once(c, mm.shuffle_sections(red), f"{c['id']}-{mode}-shuf", mode=mode)
+            pii = await run_once(c, redact(mm.inject_pii(c["resume"]), nlp)[0], f"{c['id']}-{mode}-pii", mode=mode)
             leak = mt.pii_leak_rate(mm.PLANTED_PII, redact(mm.inject_pii(""), nlp)[0])
             strong = next((r for r in base["requirements"] if r["match"] == "strong"), None)
             drop = None
@@ -96,13 +100,13 @@ async def main():
                 term = max(strong["evidence"].split(), key=len)
                 dropped, n = mm.remove_evidence(red, term)
                 if n:
-                    drop = (await run_once(c, dropped, f"{c['id']}-drop"))["score"] - base["score"]
+                    drop = (await run_once(c, dropped, f"{c['id']}-{mode}-drop", mode=mode))["score"] - base["score"]
             row["metamorphic"] = {"shuffle_delta": shuf["score"] - base["score"], "pii_delta": pii["score"] - base["score"],
                                   "pii_leak_rate": leak, "remove_evidence_delta": drop}
         if a.trace:
             row["trace"] = tr
         report.append(row)
-        lines.append(f"\n## {c['id']}\nscore **{base['score']}** ({base['decision']}, {base['confidence']} confidence, "
+        lines.append(f"\n## {c['id']} [{mode}]\nscore **{base['score']}** ({base['decision']}, {base['confidence']} confidence, "
                      f"engine `{base['engine']}`) vs reference {ref.get('score', 'n/a')} ({ref.get('ref_decision', 'n/a') if ref else ''})  ")
         lines.append(f"repeat stdev {f(st['stdev'])}, range {f(st['range'])}; faithfulness {f(row['faithfulness'])}  ")
         if rm:
@@ -112,9 +116,10 @@ async def main():
             m = row["metamorphic"]
             lines.append(f"metamorphic: shuffle Δ{m['shuffle_delta']:+.1f}, PII Δ{m['pii_delta']:+.1f}, "
                          f"PII leak {f(m['pii_leak_rate'])}, remove-evidence Δ{m['remove_evidence_delta'] if m['remove_evidence_delta'] is None else format(m['remove_evidence_delta'], '+.1f')}")
-    if pairs_s:
-        lines.append(f"\n## Aggregate\nMAE vs reference **{f(mt.mae(pairs_s))}** over {len(pairs_s)} cases; "
-                     f"Apply/not-Apply agreement **{f(mt.decision_agreement(pairs_d))}**")
+    for mode, (pairs_s, pairs_d) in agg.items():
+        if pairs_s:
+            lines.append(f"\n## Aggregate [{mode}]\nMAE vs reference **{f(mt.mae(pairs_s))}** over {len(pairs_s)} cases; "
+                         f"Apply/not-Apply agreement **{f(mt.decision_agreement(pairs_d))}**")
     (OUT / "report.json").write_text(json.dumps(report, indent=2, default=str))
     (OUT / "report.md").write_text("\n".join(lines))
     print("\n".join(lines))

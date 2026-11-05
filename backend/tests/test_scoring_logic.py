@@ -76,7 +76,7 @@ async def fake_embed(texts, task):
     return out / (np.linalg.norm(out, axis=1, keepdims=True) + 1e-9)
 
 
-def run_screen(monkeypatch, p1, p2):
+def run_screen(monkeypatch, p1, p2, mode="rag", embed=None, target_roles=""):
     seen = {}
 
     async def fake_json(client, system, user):
@@ -87,9 +87,9 @@ def run_screen(monkeypatch, p1, p2):
 
     monkeypatch.setattr(scoring, "_client", lambda: object())
     monkeypatch.setattr(scoring, "_generate_json", fake_json)
-    monkeypatch.setattr(scoring, "_embed", fake_embed)
+    monkeypatch.setattr(scoring, "_embed", embed or fake_embed)
     scoring._cache.clear()
-    return asyncio.run(scoring.screen(JD, CV, "Associate ML Engineer", owner="t")), seen
+    return asyncio.run(scoring.screen(JD, CV, "Associate ML Engineer", owner="t", mode=mode, target_roles=target_roles)), seen
 
 
 P1 = {"role_summary": {"archetype": "ml"}, "requirements": [
@@ -121,3 +121,22 @@ def test_judge_always_sees_nearest_chunk(monkeypatch):
                             "evidence": "structural", "jd_signal": "section"}]}
     _, seen = run_screen(monkeypatch, p1, {"matches": [], "global_score": 2.0})
     assert '"resume_snippets": []' not in seen["payload"]
+
+
+def test_full_mode_sends_whole_resume_and_skips_embeddings(monkeypatch):
+    async def boom(*a, **k):
+        raise AssertionError("full mode must not call the embedder")
+    res, seen = run_screen(monkeypatch, P1, P2, mode="full", embed=boom)
+    assert '"resume":' in seen["payload"] and "resume_snippets" not in seen["payload"]
+    assert res["evidence_mode"] == "full"
+
+
+def test_rag_mode_still_retrieves(monkeypatch):
+    res, seen = run_screen(monkeypatch, P1, P2, mode="rag")
+    assert "resume_snippets" in seen["payload"] and '"resume":' not in seen["payload"]
+    assert res["engine"].startswith("rag-")
+
+
+def test_target_roles_reach_the_judge(monkeypatch):
+    _, seen = run_screen(monkeypatch, P1, P2, target_roles="AI/ML Engineer (fresher)")
+    assert "AI/ML Engineer (fresher)" in seen["payload"]

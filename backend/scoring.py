@@ -42,7 +42,7 @@ load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
 
 APPLY_THRESHOLD = 4.0
-ENGINE_VERSION = "careerops-v2"
+ENGINE_VERSION = "careerops-v3"
 LLM_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
@@ -50,6 +50,7 @@ MAX_JD_CHARS = 8000
 MAX_RESUME_CHARS = 15000
 TOP_K = int(os.environ.get("TOP_K", "3"))
 SIM_FLOOR = float(os.environ.get("SIM_FLOOR", "0.30"))  # swept by evals/run_eval.py
+EVIDENCE_MODE = os.environ.get("KAIRO_EVIDENCE_MODE", "full")  # "full" = whole resume (career-ops), "rag" = retrieved chunks
 ROW_BUDGET = 12  # career-ops: at most 12 rows; critical/high always retained
 
 BANDS = ["critical", "high", "meaningful", "preferred", "low_signal"]
@@ -72,7 +73,7 @@ def purge_cache(owner: str) -> int:
 
 def _client():
     """OpenAI-compatible client pointed at Groq's free tier."""
-    key = os.environ.get("GROQ_API_KEY")
+    key = os.environ.get("LLM_API_KEY") or os.environ.get("GROQ_API_KEY")  # any OpenAI-compatible free provider
     if not key:
         return None
     from openai import AsyncOpenAI
@@ -232,7 +233,9 @@ PASS2_SYSTEM = (
     "If candidate_level_expected is 'entry': this is a fresher/early-career role. Do NOT require professional years of experience. "
     "Academic projects, internships, coursework, hackathons and personal projects that demonstrate the skill count as strong "
     "evidence, and 'basic' or 'working understanding' requirements are met by any concrete use of the concept.\n"
-    "You are given each requirement with its fixed importance (do NOT change importance) and the best matching resume snippets. "
+    "You are given each requirement with its fixed importance (do NOT change importance) and the evidence to judge it against: "
+    "either `resume` (the whole redacted resume, read all of it before judging any row) or per-row `resume_snippets`. "
+    "If `target_roles` is given, judge north_star against those target roles; otherwise against the candidate's apparent trajectory. "
     "For each, set match: strong (clear evidence in the snippets) | partial (adjacent or weaker evidence) | missing (no evidence) | "
     "na (not a claim about skills). A 'strong' REQUIRES `evidence` copied verbatim from the snippets; otherwise use partial. "
     "Importance guides what matters; it is not arithmetic. Be fair: wrongly telling a candidate not to apply is the costly error, "
@@ -342,11 +345,14 @@ def heuristic_fallback(similarity_pct: float, reason: str = "") -> Dict[str, Any
 # --------------------------------------------------------------------------- main
 
 async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str = "",
-                 trace: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 trace: Optional[Dict[str, Any]] = None, mode: Optional[str] = None,
+                 target_roles: str = "") -> Dict[str, Any]:
     """Full evaluation. Raises on API failure (caller falls back)."""
     jd = jd_text[:MAX_JD_CHARS]
     cv = resume_text[:MAX_RESUME_CHARS]
-    key = hashlib.sha256((ENGINE_VERSION + owner + jd + "\x00" + cv).encode()).hexdigest()
+    mode = mode if mode in ("full", "rag") else EVIDENCE_MODE
+    target_roles = (target_roles or "")[:300]
+    key = hashlib.sha256((ENGINE_VERSION + mode + LLM_MODEL + target_roles + owner + jd + "\x00" + cv).encode()).hexdigest()
     if key in _cache:
         return _cache[key][1]
 
@@ -375,26 +381,30 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         raise ValueError("No assessable requirements found in job description")
 
     # ---- Retrieval (RAG): best resume evidence per requirement ----
-    chunk_vecs = await _embed(chunks, "doc")
-    req_vecs = await _embed([r["text"] for r in skills], "query")
-    sims = req_vecs @ chunk_vecs.T
-    snippets: List[List[str]] = []
-    for i in range(len(skills)):
+    snippets: List[List[str]] = [[] for _ in skills]
+    if mode == "rag":
+        chunk_vecs = await _embed(chunks, "doc")
+        req_vecs = await _embed([r["text"] for r in skills], "query")
+        sims = req_vecs @ chunk_vecs.T
+    for i in range(len(skills) if mode == "rag" else 0):
         top = np.argsort(-sims[i])[:TOP_K]
         keep = [chunks[j] for j in top if sims[i][j] > SIM_FLOOR]
-        snippets.append(keep or [chunks[top[0]]])  # judge sees the nearest chunk, not nothing
+        snippets[i] = keep or [chunks[top[0]]]  # judge sees the nearest chunk, not nothing
 
     # ---- Pass 2: judge against evidence ----
     payload = {
         "job_title": job_title,
         "role_summary": p1.get("role_summary", {}),
+        "target_roles": target_roles or "not provided",
         "candidate_level_expected": "entry" if is_entry_level(jd + " " + job_title) else "unspecified",
         "requirements": [
-            {"id": i, "requirement": r["text"], "importance": r["importance"], "evidence_tier": r["evidence_tier"],
-             "resume_snippets": snippets[i]}
+            ({"id": i, "requirement": r["text"], "importance": r["importance"], "evidence_tier": r["evidence_tier"]}
+             | ({"resume_snippets": snippets[i]} if mode == "rag" else {}))
             for i, r in enumerate(skills)
         ],
     }
+    if mode == "full":
+        payload["resume"] = cv
     p2 = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload))
     by_id = {m.get("id"): m for m in p2.get("matches", []) if isinstance(m, dict)}
     if trace is not None:
@@ -405,7 +415,7 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         m = by_id.get(i, {})
         match = m.get("match") if m.get("match") in MATCH_TO_STATUS else "missing"
         evidence = (m.get("evidence") or "").strip()
-        pool = " ".join(snippets[i])
+        pool = cv if mode == "full" else " ".join(snippets[i])
         # Source-of-truth boundary: a 'strong' must be backed by real resume text.
         if match == "strong" and (not evidence or _overlap(evidence, pool) < 0.6):
             match = "partial"
@@ -456,7 +466,7 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         "checklist": checklist,
         "summary": p2.get("summary", ""),
         "next_action": p2.get("next_action", ""),
-        "engine": "rag-groq-" + ENGINE_VERSION,
+        "engine": f"{mode}-{ENGINE_VERSION}", "evidence_mode": mode,
         **decide(score, confidence, hard_stops),
     }
     _cache[key] = (owner, result)
