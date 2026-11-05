@@ -956,6 +956,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def ensure_indexes():
+    """Real MongoDB only: fast owner lookups + one user per Google account."""
+    if client is None:
+        return
+    try:
+        await db.users.create_index("google_sub", unique=True)
+        await db.users.create_index("id", unique=True)
+        await db.sessions.create_index([("user_id", 1), ("created_at", -1)])
+        await db.sessions.create_index("id", unique=True)
+        await db.resumes.create_index([("user_id", 1), ("session_id", 1)])
+        await db.resumes.create_index("id", unique=True)
+        await db.chat_messages.create_index("resume_id")
+        await db.usage.create_index([("user_id", 1), ("day", 1), ("kind", 1)], unique=True)
+    except Exception as e:  # never block startup on index creation
+        logger.error(f"Index creation failed: {e}")
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     if client:
