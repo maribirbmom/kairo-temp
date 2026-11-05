@@ -22,7 +22,12 @@ load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-DEV_AUTH = os.environ.get("DEV_AUTH", "").lower() in ("1", "true", "yes")
+# Dev login is only honoured with the throwaway in-memory database. With a real
+# MONGO_URL it is forced off, so a stray DEV_AUTH=true can never open a hole in production.
+_USING_REAL_DB = not os.environ.get("MONGO_URL", "memory://local").startswith("memory://")
+DEV_AUTH = os.environ.get("DEV_AUTH", "").lower() in ("1", "true", "yes") and not _USING_REAL_DB
+if os.environ.get("DEV_AUTH", "").lower() in ("1", "true", "yes") and _USING_REAL_DB:
+    logger.warning("DEV_AUTH ignored: a real MONGO_URL is configured")
 TOKEN_TTL_SECONDS = int(os.environ.get("SESSION_TTL_HOURS", "168")) * 3600  # 7 days
 
 _secret = os.environ.get("SESSION_SECRET", "").strip()
