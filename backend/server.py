@@ -27,9 +27,8 @@ from docx import Document
 from openai import AsyncOpenAI
 
 # NLP
-import spacy
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+import math
+from collections import Counter
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -134,14 +133,6 @@ if mongo_url.startswith("memory://") or AsyncIOMotorClient is None:
 else:
     client = AsyncIOMotorClient(mongo_url)
     db = client[db_name]
-
-# Load spaCy model
-try:
-    nlp = spacy.load("en_core_web_sm")
-except:
-    import subprocess
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -272,35 +263,32 @@ def extract_text_from_docx(file_content: bytes) -> str:
         logger.error(f"Error extracting DOCX text: {e}")
     return text.strip()
 
+STOPWORDS = set("""a an and are as at be by for from has have in is it its of on or that the this to was were will with
+you your we our they their i he she not but if so can may must should would could about into than then also other such
+using use used work working experience years year strong knowledge ability skills team role job position candidate""".split())
+
+
+def _tokens(text: str) -> List[str]:
+    return [t for t in re.findall(r"[a-z][a-z0-9+#.]{1,}", text.lower()) if t not in STOPWORDS and len(t) > 2]
+
+
 def extract_keywords(text: str) -> List[str]:
-    """Extract important keywords from text using spaCy"""
-    doc = nlp(text)
-    keywords = []
-    
-    # Extract noun phrases, proper nouns, and technical terms
-    for chunk in doc.noun_chunks:
-        if len(chunk.text) > 2:
-            keywords.append(chunk.text.lower())
-    
-    # Extract named entities
-    for ent in doc.ents:
-        if ent.label_ in ["ORG", "PRODUCT", "SKILL", "GPE"]:
-            keywords.append(ent.text.lower())
-    
-    # Extract individual nouns and proper nouns
-    for token in doc:
-        if token.pos_ in ["NOUN", "PROPN"] and len(token.text) > 2:
-            keywords.append(token.text.lower())
-    
-    return list(set(keywords))
+    """Keywords and two-word phrases (dependency-free, no NLP model needed)."""
+    toks = _tokens(text)
+    grams = set(toks)
+    grams.update(f"{a} {b}" for a, b in zip(toks, toks[1:]))
+    return list(grams)
+
 
 def calculate_similarity(text1: str, text2: str) -> float:
-    """Calculate TF-IDF cosine similarity between two texts"""
+    """Cosine similarity of term-frequency vectors, as a 0-100 score."""
     try:
-        vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
-        tfidf_matrix = vectorizer.fit_transform([text1, text2])
-        similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
-        return round(similarity * 100, 1)
+        a, b = Counter(_tokens(text1)), Counter(_tokens(text2))
+        if not a or not b:
+            return 0.0
+        dot = sum(a[t] * b[t] for t in a.keys() & b.keys())
+        norm = math.sqrt(sum(v * v for v in a.values())) * math.sqrt(sum(v * v for v in b.values()))
+        return round(100 * dot / norm, 1) if norm else 0.0
     except Exception as e:
         logger.error(f"Error calculating similarity: {e}")
         return 0.0
@@ -426,7 +414,7 @@ Provide a brief 2-3 sentence insight highlighting key alignments and one area fo
 
 # ==================== AUTH, QUOTAS ====================
 
-MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "5")) * 1024 * 1024
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "4")) * 1024 * 1024
 MAX_JD_CHARS = 20000
 DAILY_LIMITS = {
     "upload": int(os.environ.get("LIMIT_UPLOADS_PER_DAY", "30")),
@@ -642,7 +630,7 @@ async def upload_resume(session_id: str, file: UploadFile = File(...), user: dic
     
     # Strip personal details BEFORE anything is stored or sent to an LLM.
     # The raw text is never persisted.
-    extracted_text, redaction_counts = redact.redact(extracted_text, nlp)
+    extracted_text, redaction_counts = redact.redact(extracted_text)
     if not extracted_text.strip():
         raise HTTPException(status_code=400, detail="Resume has no readable content after redaction")
 

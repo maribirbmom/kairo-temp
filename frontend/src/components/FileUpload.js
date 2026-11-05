@@ -67,7 +67,7 @@ const FileUpload = ({ onFilesSelected, files, onRemoveFile, onDetailedAnalysis }
             <span className="material-symbols-outlined text-primary text-4xl">cloud_upload</span>
           </div>
           <p className="mb-1 text-base text-text-main font-bold">Click to upload or drag and drop</p>
-          <p className="text-sm text-text-muted">PDF (MAX. 10MB per file)</p>
+          <p className="text-sm text-text-muted">PDF or DOCX (max 4 MB per file)</p>
         </div>
       </div>
 

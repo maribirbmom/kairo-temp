@@ -23,7 +23,7 @@ JD -> LLM extracts requirements (must / nice-to-have)
 
 - **RAG grounding:** the model only sees retrieved resume evidence per requirement, so gaps are specific and verifiable.
 - **Never fabricates:** the CV Coach may reword or surface experience already on the resume. For real gaps it recommends building real experience.
-- **Zero-cost stack:** Groq free tier (LLM), local `fastembed` embeddings, spaCy, MongoDB Atlas free tier.
+- **Zero-cost stack:** Groq free tier (LLM), local `fastembed` embeddings, MongoDB Atlas free tier, Vercel (frontend + API).
 
 ## Credit
 
@@ -35,7 +35,7 @@ with or endorsed by career-ops.
 
 ## Privacy and security
 
-- Personal details are removed **on the server at upload**; only redacted text is stored or sent to the LLM. Redaction is best-effort (rules + spaCy), so check your file.
+- Personal details are removed **on the server at upload**; only redacted text is stored or sent to the LLM. Redaction is best-effort (pattern rules), so check your file.
 - Redacted text is sent to a third-party LLM provider (Groq). Free tiers may retain inputs, so don't upload anything you wouldn't share.
 - Google sign-in (ID token verified server-side); every route is owner-checked; users can delete their account and all data.
 - Per-user daily limits and upload size caps protect the free quota.
