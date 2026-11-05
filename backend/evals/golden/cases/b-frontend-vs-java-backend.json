@@ -1,0 +1,43 @@
+{
+  "id": "b-frontend-vs-java-backend",
+  "title": "Backend Engineer (Java)",
+  "jd": "Backend Engineer (0-2 years), Harbor Payments, Pune\nJoin the team that builds our payment APIs.\n\nRequired\n- Java and Spring Boot.\n- Designing and building REST APIs.\n- Relational database design (PostgreSQL) and query tuning.\n- Solid data structures and algorithms.\n\nGood to have\n- Docker and CI/CD.\n- Message queues such as Kafka.\n\nYou will own services end to end, from design review to production support.",
+  "resume": "Test Candidate B\nEDUCATION\nB.E. Information Technology, 2025. Coursework: DBMS, Data Structures, Web Technologies.\nEXPERIENCE\nFrontend Intern, 4 months, a design agency\n- Built reusable React and TypeScript components and wrote Jest tests.\n- Consumed REST endpoints and handled loading and error states.\nPROJECTS\nE-commerce storefront in React with Redux, deployed on Netlify.\nPersonal portfolio site with accessible, responsive CSS.\nSKILLS\nJavaScript, TypeScript, React, Redux, HTML, CSS, Jest, Figma, Git, basic SQL from coursework",
+  "note": "Capable frontend fresher applying to a Java backend role: core stack missing. Expect Skip.",
+  "reference": {
+    "score": 2.8,
+    "decision": "Skip",
+    "requirements": [
+      {
+        "requirement": "Java and Spring Boot",
+        "importance": "critical",
+        "match": "missing"
+      },
+      {
+        "requirement": "Designing and building REST APIs",
+        "importance": "high",
+        "match": "partial"
+      },
+      {
+        "requirement": "Relational database design PostgreSQL and query tuning",
+        "importance": "high",
+        "match": "partial"
+      },
+      {
+        "requirement": "Solid data structures and algorithms",
+        "importance": "high",
+        "match": "partial"
+      },
+      {
+        "requirement": "Docker and CI/CD",
+        "importance": "preferred",
+        "match": "missing"
+      },
+      {
+        "requirement": "Message queues such as Kafka",
+        "importance": "preferred",
+        "match": "missing"
+      }
+    ]
+  }
+}

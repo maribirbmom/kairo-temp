@@ -1,0 +1,43 @@
+{
+  "id": "e-analyst-to-ml",
+  "title": "Machine Learning Engineer",
+  "jd": "Machine Learning Engineer (2-4 years), Orbit Retail, Hyderabad\nOwn models from experiment to production.\n\nRequired\n- 2+ years of experience shipping ML models to production.\n- Strong Python and model training experience (scikit-learn, PyTorch or TensorFlow).\n- SQL and data pipeline skills.\n- Experience with model deployment and monitoring (MLOps).\n\nGood to have\n- A/B testing and experimentation.\n- Cloud (AWS, GCP or Azure).",
+  "resume": "Test Candidate E\nEXPERIENCE\nData Analyst, 3 years, an e-commerce company\n- Wrote SQL and Python (pandas) reports and automated a weekly KPI pipeline with Airflow.\n- Designed and analysed A/B tests for checkout changes, and presented results to product managers.\n- Built Tableau dashboards used by 40 stakeholders.\nEDUCATION\nB.Sc. Statistics, 2021. Completed an online machine learning course (scikit-learn); capstone: house price regression model.\nSKILLS\nSQL, Python, pandas, Airflow, Tableau, A/B testing, basic scikit-learn",
+  "note": "Adjacent career switcher, below the 3.5 line. Expect Skip or Consider, never Apply.",
+  "reference": {
+    "score": 3.3,
+    "decision": "Skip",
+    "requirements": [
+      {
+        "requirement": "2+ years shipping ML models to production",
+        "importance": "critical",
+        "match": "missing"
+      },
+      {
+        "requirement": "Strong Python and model training scikit-learn PyTorch TensorFlow",
+        "importance": "high",
+        "match": "partial"
+      },
+      {
+        "requirement": "SQL and data pipeline skills",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Model deployment and monitoring MLOps",
+        "importance": "high",
+        "match": "missing"
+      },
+      {
+        "requirement": "A/B testing and experimentation",
+        "importance": "preferred",
+        "match": "strong"
+      },
+      {
+        "requirement": "Cloud AWS GCP or Azure",
+        "importance": "preferred",
+        "match": "missing"
+      }
+    ]
+  }
+}

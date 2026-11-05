@@ -96,6 +96,7 @@ async def main():
         if a.metamorphic:
             shuf = await run_once(c, mm.shuffle_sections(red), f"{c['id']}-{mode}-shuf", mode=mode)
             pii = await run_once(c, redact(mm.inject_pii(c["resume"]), nlp)[0], f"{c['id']}-{mode}-pii", mode=mode)
+            inj = await run_once({**c, "jd": mm.inject_jd_instruction(c["jd"])}, red, f"{c['id']}-{mode}-inj", mode=mode)
             leak = mt.pii_leak_rate(mm.PLANTED_PII, redact(mm.inject_pii(""), nlp)[0])
             strong = next((r for r in base["requirements"] if r["match"] == "strong"), None)
             drop = None
@@ -105,7 +106,7 @@ async def main():
                 if n:
                     drop = (await run_once(c, dropped, f"{c['id']}-{mode}-drop", mode=mode))["score"] - base["score"]
             row["metamorphic"] = {"shuffle_delta": shuf["score"] - base["score"], "pii_delta": pii["score"] - base["score"],
-                                  "pii_leak_rate": leak, "remove_evidence_delta": drop}
+                                  "pii_leak_rate": leak, "injection_delta": inj["score"] - base["score"], "remove_evidence_delta": drop}
         if a.trace:
             row["trace"] = tr
         report.append(row)
@@ -126,11 +127,12 @@ async def main():
         if "metamorphic" in row:
             m = row["metamorphic"]
             lines.append(f"metamorphic: shuffle Δ{m['shuffle_delta']:+.1f}, PII Δ{m['pii_delta']:+.1f}, "
-                         f"PII leak {f(m['pii_leak_rate'])}, remove-evidence Δ{m['remove_evidence_delta'] if m['remove_evidence_delta'] is None else format(m['remove_evidence_delta'], '+.1f')}")
+                         f"JD-injection Δ{m['injection_delta']:+.1f}, PII leak {f(m['pii_leak_rate'])}, remove-evidence Δ{m['remove_evidence_delta'] if m['remove_evidence_delta'] is None else format(m['remove_evidence_delta'], '+.1f')}")
     for mode, (pairs_s, pairs_d) in agg.items():
         if pairs_s:
             lines.append(f"\n## Aggregate [{mode}]\nMAE vs reference **{f(mt.mae(pairs_s))}** over {len(pairs_s)} cases; "
-                         f"Apply/not-Apply agreement **{f(mt.decision_agreement(pairs_d))}**")
+                         f"Apply/not-Apply agreement **{f(mt.decision_agreement(pairs_d))}**; "
+                         f"rank correlation (Spearman) **{f(mt.spearman([p for p, _ in pairs_s], [q for _, q in pairs_s]))}**")
     (OUT / "report.json").write_text(json.dumps(report, indent=2, default=str))
     (OUT / "report.md").write_text("\n".join(lines))
     print("\n".join(lines))

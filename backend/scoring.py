@@ -42,7 +42,7 @@ load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
 
 APPLY_THRESHOLD = 4.0
-ENGINE_VERSION = "careerops-v5"
+ENGINE_VERSION = "careerops-v7"
 LLM_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "")  # low|medium|high; empty = provider default
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
@@ -175,6 +175,56 @@ def chunk_resume(text: str, max_len: int = 500) -> List[str]:
     return [c for c in chunks if len(c) > 15]
 
 
+MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_DATE = r"(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+)?((?:19|20)\d{2})"
+RANGE_RE = re.compile(_DATE + r"\s*(?:-|\u2013|\u2014|to)\s*(?:" + _DATE + r"|(present|current|now|ongoing|till date))", re.I)
+EXP_HEAD_RE = re.compile(r"^\s*(?:#+\s*)?(?:work |professional |relevant )?(experience|employment|internships?|work history)\b", re.I)
+ANY_HEAD_RE = re.compile(r"^\s*(?:#+\s*)?(education|projects?|skills?|certifications?|summary|objective|achievements|publications|awards)\b", re.I)
+
+
+def estimate_experience_years(resume: str, today: Optional[Tuple[int, int]] = None) -> Optional[float]:
+    """Years of professional experience from dated ranges inside the Experience/Internships sections only.
+
+    Deterministic so the judge does not have to do date arithmetic (small models get it wrong). Overlapping
+    ranges are merged. Returns None when no dated entry is found, never a guess.
+    """
+    import datetime
+    now = today or (datetime.date.today().year, datetime.date.today().month)
+    in_exp, spans = False, []
+    for line in resume.splitlines():
+        if EXP_HEAD_RE.match(line) and len(line) < 60:
+            in_exp = True
+            continue
+        if ANY_HEAD_RE.match(line) and len(line) < 60:
+            in_exp = False
+            continue
+        if not in_exp:
+            continue
+        for m in RANGE_RE.finditer(line):
+            m1, y1, m2, y2, cur = m.groups()
+            # Year-only dates are mid-year (so 2020-2022 is 2 years, not 3); explicit months count inclusively.
+            a = int(y1) * 12 + (MONTHS[m1.lower()[:3]] if m1 else 6)
+            if cur:
+                b = now[0] * 12 + now[1]
+            else:
+                b = int(y2) * 12 + (MONTHS[m2.lower()[:3]] + 1 if m2 else 6)
+            if b >= a:
+                spans.append((a, b))
+    if not spans:
+        return None
+    spans.sort()
+    total, (cs, ce) = 0, spans[0]
+    for a, b in spans[1:]:
+        if a <= ce:
+            ce = max(ce, b)
+        else:
+            total += ce - cs
+            cs, ce = a, b
+    total += ce - cs
+    return round(total / 12, 1)
+
+
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (s or "").lower())).strip()
 
@@ -250,7 +300,7 @@ LINK_CLAUSE_RE = re.compile(
 
 ENTRY_LEVEL_RE = re.compile(
     r"\b(freshers?|new[- ]?grad(?:uate)?s?|entry[- ]level|early[- ]career|graduate engineer|trainee|junior|"
-    r"associate (?:software )?engineer|0\s*(?:-|to|\u2013)\s*[12]\s*years?)\b", re.I)
+    r"0\s*(?:-|to|\u2013)\s*[12]\s*years?)\b", re.I)
 
 
 def is_entry_level(jd: str) -> bool:
@@ -304,12 +354,15 @@ PASS2_SYSTEM = (
     "Academic projects, internships, coursework, hackathons and personal projects that demonstrate the skill count as strong "
     "evidence, and 'basic' or 'working understanding' requirements are met by any concrete use of the concept.\n"
     "You are given each requirement with its fixed importance (do NOT change importance) and the evidence to judge it against: "
-    "either `resume` (the whole redacted resume, read all of it before judging any row) or per-row `resume_snippets`. "
+    "`experience_years_estimate` is computed from the resume's dated experience entries (null = undeterminable); use it for any "
+    "years-of-experience requirement instead of doing date arithmetic yourself, and treat internships as experience for entry-level roles. "
+    "Evidence is either `resume` (the whole redacted resume, read all of it before judging any row) or per-row `resume_snippets`. "
     "If `target_roles` is given, judge north_star against those target roles; otherwise against the candidate's apparent trajectory. "
     "For each, set match: strong (clear evidence in the snippets) | partial (adjacent or weaker evidence) | missing (no evidence) | "
     "na (not a claim about skills). First split the requirement into its distinct elements (e.g. 'prompting, embeddings, RAG, basic "
     "evaluation' is four elements). 'strong' means EVERY element is shown by specific resume text, not merely the topic area; "
-    "if some elements are shown and others are absent, the row is partial and gap_note names the absent elements. Never credit a "
+    "if some elements are shown and others are absent, the row is partial and gap_note names the absent elements. Strength of evidence matters: 'strong' needs the skill DEMONSTRATED in work, an internship or a "
+    "substantive project; a certificate, a course, a self-study lab or a skills-list mention on its own is only partial. Never credit a "
     "skill the resume does not state (no inferring 'knows X' from 'knows Y'). A 'strong' REQUIRES `evidence` copied verbatim from the resume "
     "(fragments joined by ' ... ' are fine); otherwise use partial. "
     "Importance guides what matters; it is not arithmetic. Be fair: wrongly telling a candidate not to apply is the costly error, "
@@ -470,6 +523,7 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         "job_title": job_title,
         "role_summary": p1.get("role_summary", {}),
         "target_roles": target_roles or "not provided",
+        "experience_years_estimate": estimate_experience_years(cv),
         "candidate_level_expected": "entry" if is_entry_level(jd + " " + job_title) else "unspecified",
         "requirements": [
             ({"id": i, "requirement": r["text"], "importance": r["importance"], "evidence_tier": r["evidence_tier"]}

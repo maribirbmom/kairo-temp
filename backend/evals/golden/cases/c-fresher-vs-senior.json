@@ -1,0 +1,43 @@
+{
+  "id": "c-fresher-vs-senior",
+  "title": "Senior Backend Engineer",
+  "jd": "Senior Backend Engineer, Lattice Cloud, Remote (India)\nYou will lead the design of our event-driven platform.\n\nRequired\n- 7+ years of professional backend engineering experience.\n- Proven experience designing and operating distributed systems and microservices at scale.\n- Experience leading and mentoring other engineers.\n- Production experience with Kafka and AWS.\n- Strong system design skills.\n\nGood to have\n- Kubernetes, Terraform.",
+  "resume": "Test Candidate C\nEDUCATION\nB.Tech Computer Science, 2026.\nPROJECTS\nURL shortener in Python and Flask with Redis caching.\nChat application with WebSockets and PostgreSQL.\nLibrary management REST API in Django.\nINTERNSHIP\nBackend Intern, 2 months: fixed bugs and added endpoints in a Django service.\nSKILLS\nPython, Django, Flask, PostgreSQL, Redis, Git",
+  "note": "Hard seniority mismatch. Expect Skip with hard stops.",
+  "reference": {
+    "score": 1.8,
+    "decision": "Skip",
+    "requirements": [
+      {
+        "requirement": "7+ years of professional backend experience",
+        "importance": "critical",
+        "match": "missing"
+      },
+      {
+        "requirement": "Designing and operating distributed systems and microservices at scale",
+        "importance": "critical",
+        "match": "missing"
+      },
+      {
+        "requirement": "Leading and mentoring other engineers",
+        "importance": "high",
+        "match": "missing"
+      },
+      {
+        "requirement": "Production experience with Kafka and AWS",
+        "importance": "high",
+        "match": "missing"
+      },
+      {
+        "requirement": "Strong system design skills",
+        "importance": "high",
+        "match": "partial"
+      },
+      {
+        "requirement": "Kubernetes Terraform",
+        "importance": "preferred",
+        "match": "missing"
+      }
+    ]
+  }
+}

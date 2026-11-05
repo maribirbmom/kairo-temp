@@ -193,3 +193,13 @@ def test_persistently_incomplete_json_raises_so_fallback_is_labelled():
 def test_out_of_range_score_is_rejected():
     client = _FakeClient([GOOD.replace("4.1", "9.5"), GOOD])
     assert asyncio.run(scoring._generate_json(client, "s", "u", REQ))["global_score"] == 4.1
+
+
+def test_experience_years_from_dated_experience_only():
+    cv = ("EXPERIENCE\nSenior Engineer, 2022-present, a platform\nEngineer, 2019 - 2022, a fintech\n"
+          "EDUCATION\nB.E. 2015 - 2019\nSKILLS\nGo")
+    assert abs(scoring.estimate_experience_years(cv, today=(2026, 11)) - 7.4) < 0.15
+    assert scoring.estimate_experience_years("EDUCATION\nB.Tech 2022 - 2026\nPROJECTS\nX", today=(2026, 11)) is None
+    assert scoring.estimate_experience_years("EXPERIENCE\nAI/ML Intern, Jan 2025 - Jun 2025\nEDUCATION\n2022 - 2026") == 0.5
+    overlap = "EXPERIENCE\nA 2020 - 2022\nB 2021 - 2023\nSKILLS\n"
+    assert scoring.estimate_experience_years(overlap) == 3.0

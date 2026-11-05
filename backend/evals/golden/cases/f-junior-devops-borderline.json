@@ -1,0 +1,48 @@
+{
+  "id": "f-junior-devops-borderline",
+  "title": "Junior DevOps Engineer",
+  "jd": "Junior DevOps Engineer (1-3 years), Cobalt Systems, Mumbai\nHelp us run and automate our cloud infrastructure.\n\nRequired\n- Linux administration.\n- CI/CD pipelines (Jenkins or GitHub Actions).\n- Containers with Docker.\n- Scripting in Bash or Python.\n\nGood to have\n- Kubernetes.\n- Infrastructure as code (Terraform).\n- AWS experience.",
+  "resume": "Test Candidate F\nEXPERIENCE\nSystems Administrator, 1 year, an IT services company\n- Administered 30 Linux servers (patching, users, cron, monitoring with Nagios).\n- Wrote Bash scripts to automate backups and log rotation.\n- Containerised an internal tool with Docker and set up a GitHub Actions pipeline to build and test it.\nEDUCATION\nB.Sc. IT, 2024. Self-study: Kubernetes basics lab on a local cluster.\nCERTIFICATIONS\nAWS Cloud Practitioner\nSKILLS\nLinux, Bash, Python scripting, Docker, GitHub Actions, Nagios, basic Kubernetes",
+  "note": "Solid junior fit with preferred gaps; borderline just under 4.0. Calibration case.",
+  "reference": {
+    "score": 3.9,
+    "decision": "Consider",
+    "requirements": [
+      {
+        "requirement": "Linux administration",
+        "importance": "critical",
+        "match": "strong"
+      },
+      {
+        "requirement": "CI/CD pipelines Jenkins or GitHub Actions",
+        "importance": "critical",
+        "match": "strong"
+      },
+      {
+        "requirement": "Containers with Docker",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Scripting in Bash or Python",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Kubernetes",
+        "importance": "preferred",
+        "match": "partial"
+      },
+      {
+        "requirement": "Infrastructure as code Terraform",
+        "importance": "preferred",
+        "match": "missing"
+      },
+      {
+        "requirement": "AWS experience",
+        "importance": "preferred",
+        "match": "partial"
+      }
+    ]
+  }
+}
