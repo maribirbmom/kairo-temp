@@ -79,7 +79,7 @@ async def fake_embed(texts, task):
 def run_screen(monkeypatch, p1, p2, mode="rag", embed=None, target_roles=""):
     seen = {}
 
-    async def fake_json(client, system, user, required=()):
+    async def fake_json(client, system, user, required=(), usage=None):
         if "JD-reading pass" in system:
             return p1
         seen["payload"] = user
@@ -209,7 +209,7 @@ def run_scores(monkeypatch, scores):
     calls = {"n": 0}
     base = dict(P2)
 
-    async def fake_json(client, system, user, required=()):
+    async def fake_json(client, system, user, required=(), usage=None):
         if "JD-reading pass" in system:
             return P1
         out = dict(base, global_score=scores[min(calls["n"], len(scores) - 1)])
@@ -229,10 +229,43 @@ def test_borderline_score_gets_second_run_and_stable_pair_is_averaged(monkeypatc
     assert res["decision"] == "Apply" and res["score_range"] == [4.2, 4.3]
 
 
-def test_disagreeing_runs_downgrade_to_research_first_with_low_confidence(monkeypatch):
-    res, calls = run_scores(monkeypatch, [4.3, 3.7])
-    assert res["unstable"] and res["confidence"] == "low"
-    assert res["decision"] == "Research first" and res["score"] == 4.0 and res["score_range"] == [3.7, 4.3]
+def test_third_run_resolves_a_disagreement_by_median(monkeypatch):
+    res, calls = run_scores(monkeypatch, [4.3, 3.7, 4.2])
+    assert calls["n"] == 3 and res["score"] == 4.2 and not res["unstable"] and res["runs"] == 3
+
+
+def test_three_scattered_runs_are_reported_unstable_and_research_first(monkeypatch):
+    res, calls = run_scores(monkeypatch, [4.6, 3.6, 4.1])
+    assert res["unstable"] and res["confidence"] == "low" and res["score"] == 4.1
+    assert res["decision"] == "Research first" and res["score_range"] == [3.6, 4.6]
+
+
+def test_min_runs_setting_forces_three_runs_even_for_clear_scores(monkeypatch):
+    monkeypatch.setattr(scoring, "RUNS_MIN", 3)
+    res, calls = run_scores(monkeypatch, [4.8])
+    assert calls["n"] == 3 and res["runs"] == 3
+
+
+def _row(match, hb=False):
+    return {"text": "x", "importance": "high", "evidence_tier": "stated", "jd_signal": "s", "match": match,
+            "status": match, "evidence": "e", "interview_risk": "", "fix": "", "hard_blocker": hb}
+
+
+def test_row_voting_uses_median_and_marks_disputes():
+    out = scoring._vote_rows([[_row("strong")], [_row("partial")], [_row("strong")]])[0]
+    assert out["match"] == "strong" and out["votes"] == "2/3" and out["disputed"]
+    two = scoring._vote_rows([[_row("strong")], [_row("partial")]])[0]
+    assert two["match"] == "partial", "with two runs the conservative verdict wins"
+    unanimous = scoring._vote_rows([[_row("missing")], [_row("missing")]])[0]
+    assert not unanimous["disputed"]
+    assert scoring._vote_rows([[None], [None]])[0] is None
+
+
+def test_hard_blocker_needs_a_majority_of_runs():
+    runs = [[_row("missing", True)], [_row("missing", False)], [_row("missing", False)]]
+    assert not scoring._vote_rows(runs)[0]["hard_blocker"]
+    runs = [[_row("missing", True)], [_row("missing", True)], [_row("missing", False)]]
+    assert scoring._vote_rows(runs)[0]["hard_blocker"]
 
 
 def test_clear_scores_cost_one_call(monkeypatch):

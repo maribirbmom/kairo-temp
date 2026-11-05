@@ -111,7 +111,8 @@ async def main():
             row["trace"] = tr
         report.append(row)
         lines.append(f"\n## {c['id']} [{mode}]\nscore **{base['score']}** ({base['decision']}, {base['confidence']} confidence, "
-                     f"engine `{base['engine']}`) vs reference {ref.get('score', 'n/a')} ({ref.get('ref_decision', 'n/a') if ref else ''})  ")
+                     f"engine `{base['engine']}`, {base.get('runs', 1)} judge run(s) {base.get('score_runs')}, "
+                     f"{sum((base.get('usage') or {}).get(k, 0) for k in ('prompt_tokens', 'completion_tokens'))} tokens) vs reference {ref.get('score', 'n/a')} ({ref.get('ref_decision', 'n/a') if ref else ''})  ")
         lines.append(f"repeat stdev {f(st['stdev'])}, range {f(st['range'])}; faithfulness {f(row['faithfulness'])}  ")
         if rm:
             lines.append(f"requirements: coverage(crit/high) {f(rm['coverage_critical_high'])}, match acc {f(rm['match_accuracy'])}, "

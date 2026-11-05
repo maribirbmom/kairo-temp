@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,7 +43,7 @@ load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
 
 APPLY_THRESHOLD = 4.0
-ENGINE_VERSION = "careerops-v8"
+ENGINE_VERSION = "careerops-v9"
 LLM_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "")  # low|medium|high; empty = provider default
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
@@ -52,7 +53,9 @@ MAX_RESUME_CHARS = 15000
 TOP_K = int(os.environ.get("TOP_K", "3"))
 SIM_FLOOR = float(os.environ.get("SIM_FLOOR", "0.30"))  # swept by evals/run_eval.py
 EVIDENCE_MODE = os.environ.get("KAIRO_EVIDENCE_MODE", "full")  # "full" = whole resume (career-ops), "rag" = retrieved chunks
-BORDERLINE = (3.6, 4.4)   # scores in this band get a second judge pass
+BORDERLINE = (3.0, 4.6)   # a first score in this band gets a second judge pass
+RUNS_MIN = int(os.environ.get("KAIRO_MIN_RUNS", "1"))   # set 3 for maximum accuracy if your quota allows
+RUNS_MAX = int(os.environ.get("KAIRO_MAX_RUNS", "3"))
 DISAGREE_AT = 0.3          # runs further apart than this are reported as unstable, not averaged away
 ROW_BUDGET = 12  # career-ops: at most 12 rows; critical/high always retained
 
@@ -117,7 +120,8 @@ def _missing(obj: Dict[str, Any], required: Tuple[str, ...]) -> List[str]:
     return bad
 
 
-async def _generate_json(client, system: str, user: str, required: Tuple[str, ...] = ()) -> Dict[str, Any]:
+async def _generate_json(client, system: str, user: str, required: Tuple[str, ...] = (),
+                         usage: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
     """Ask for JSON and VERIFY it is complete. An incomplete reply is re-requested, never defaulted:
     a missing global_score used to become 1.0 silently, which looked like a genuine 'Skip'."""
     hint, last_err = "", "no attempt"
@@ -131,6 +135,11 @@ async def _generate_json(client, system: str, user: str, required: Tuple[str, ..
                 max_completion_tokens=MAX_TOKENS,
                 **({"extra_body": {"reasoning_effort": REASONING_EFFORT}} if REASONING_EFFORT else {}),
             )
+            u = getattr(resp, "usage", None)
+            if usage is not None and u is not None:
+                usage["calls"] = usage.get("calls", 0) + 1
+                usage["prompt_tokens"] = usage.get("prompt_tokens", 0) + (getattr(u, "prompt_tokens", 0) or 0)
+                usage["completion_tokens"] = usage.get("completion_tokens", 0) + (getattr(u, "completion_tokens", 0) or 0)
             obj = _extract_json(resp.choices[0].message.content)
         except Exception as e:  # malformed / rejected JSON is retried; auth, quota etc. is not
             if type(e).__name__ not in ("JSONDecodeError", "ValueError", "BadRequestError"):
@@ -477,6 +486,68 @@ def heuristic_fallback(similarity_pct: float, reason: str = "") -> Dict[str, Any
 
 # --------------------------------------------------------------------------- main
 
+RANK = {"missing": 0, "partial": 1, "strong": 2}
+
+
+def _judge_rows(p2: Dict[str, Any], skills: List[Dict[str, Any]], snippets: List[List[str]], cv: str, mode: str):
+    """One judge run -> one row (or None for n/a) per requirement, with the source-of-truth gates applied."""
+    by_id = {m.get("id"): m for m in p2.get("matches", []) if isinstance(m, dict)}
+    rows: List[Optional[Dict[str, Any]]] = []
+    for i, r in enumerate(skills):
+        m = by_id.get(i, {})
+        match = m.get("match") if m.get("match") in MATCH_TO_STATUS else "missing"
+        evidence = (m.get("evidence") or "").strip()
+        pool = cv if mode == "full" else " ".join(snippets[i])
+        # Source-of-truth boundary: a 'strong' must be backed by real resume text.
+        if match == "strong" and (not evidence or _overlap(evidence, pool) < 0.6):
+            match = "partial"
+        if match == "strong":
+            cov = item_coverage(r["text"], cv)  # a listed element the resume never mentions caps the row at partial
+            if cov is not None and cov < (1.0 if len(enumerated_items(r["text"])) <= 4 else 0.75):
+                match = "partial"
+        if match == "na":
+            rows.append(None)
+            continue
+        high = r["importance"] in ("critical", "high")
+        rows.append({
+            "text": r["text"], "importance": r["importance"], "evidence_tier": r["evidence_tier"],
+            "jd_signal": r["jd_signal"], "match": match, "status": MATCH_TO_STATUS[match],
+            "evidence": evidence if match != "missing" else "",
+            "interview_risk": m.get("interview_risk") or "",
+            "fix": m.get("mitigation") or "",
+            "hard_blocker": bool(m.get("hard_blocker")) and r["evidence_tier"] == "stated" and high and match != "strong",
+        })
+    return rows
+
+
+def _vote_rows(runs_rows: List[List[Optional[Dict[str, Any]]]]) -> List[Optional[Dict[str, Any]]]:
+    """Per-requirement consensus across judge runs: the median verdict (lower of two when only two runs, so a
+    skill claim is never upgraded by a single optimistic run). Marks rows whose runs disagreed."""
+    out: List[Optional[Dict[str, Any]]] = []
+    for i in range(len(runs_rows[0])):
+        cands = [rr[i] for rr in runs_rows if rr[i] is not None]
+        if not cands:
+            out.append(None)
+            continue
+        labels = sorted((c["match"] for c in cands), key=RANK.get)
+        chosen = labels[(len(labels) - 1) // 2]
+        row = dict(next(c for c in cands if c["match"] == chosen))
+        votes = sum(1 for c in cands if c["match"] == chosen)
+        row["votes"] = f"{votes}/{len(cands)}"
+        row["disputed"] = votes < len(cands)
+        row["hard_blocker"] = chosen != "strong" and sum(1 for c in cands if c["hard_blocker"]) * 2 > len(cands)
+        out.append(row)
+    return out
+
+
+def _needs_more_runs(scores: List[float]) -> bool:
+    if len(scores) == 1:
+        return BORDERLINE[0] <= scores[0] <= BORDERLINE[1]
+    if len(scores) == 2:
+        return abs(scores[0] - scores[1]) > DISAGREE_AT
+    return False
+
+
 async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str = "",
                  trace: Optional[Dict[str, Any]] = None, mode: Optional[str] = None,
                  target_roles: str = "") -> Dict[str, Any]:
@@ -497,7 +568,8 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         raise ValueError("Resume has no usable text")
 
     # ---- Pass 1: JD only (importance is fixed here and never revised) ----
-    p1 = await _generate_json(client, PASS1_SYSTEM, f"<job_description>\n{jd}\n</job_description>", ("requirements",))
+    usage: Dict[str, int] = {}
+    p1 = await _generate_json(client, PASS1_SYSTEM, f"<job_description>\n{jd}\n</job_description>", ("requirements",), usage)
     rows = _clean_requirements(p1.get("requirements", []), jd)
     expanded = []
     for r in rows:
@@ -540,49 +612,38 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
     if mode == "full":
         payload["resume"] = cv
     required2 = ("matches", "global_score", "dimensions", "score_evidence")
-    p2 = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload), required2)
-    score_runs = [round(float(p2["global_score"]), 1)]
-    if BORDERLINE[0] <= score_runs[0] <= BORDERLINE[1]:  # the band where a wrong call matters most
-        try:
-            p2b = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload), required2)
-            score_runs.append(round(float(p2b["global_score"]), 1))
-        except Exception as e:
-            logger.warning(f"second judge run failed: {e}")
-    unstable = len(score_runs) > 1 and max(score_runs) - min(score_runs) > DISAGREE_AT
-    by_id = {m.get("id"): m for m in p2.get("matches", []) if isinstance(m, dict)}
+    runs_p2: List[Dict[str, Any]] = []
+    scores: List[float] = []
+
+    async def judge_once():
+        p = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload), required2, usage)
+        runs_p2.append(p)
+        scores.append(round(float(p["global_score"]), 1))
+
+    await judge_once()  # a failure here raises (caller falls back, labelled)
+    try:
+        while len(scores) < RUNS_MAX and (len(scores) < RUNS_MIN or _needs_more_runs(scores)):
+            await judge_once()  # adaptive: extra runs only when the answer is borderline or the runs disagree
+    except Exception as e:
+        logger.warning(f"extra judge run failed, keeping {len(scores)}: {e}")
+    spread = max(scores) - min(scores)
+    unstable = len(scores) >= 2 and spread > (DISAGREE_AT if len(scores) == 2 else 2 * DISAGREE_AT)
+    med = statistics.median(scores)
+    p2 = runs_p2[min(range(len(scores)), key=lambda k: abs(scores[k] - med))]  # the run closest to the median
+    voted = _vote_rows([_judge_rows(p, skills, snippets, cv, mode) for p in runs_p2])
     if trace is not None:
-        trace.update({"pass1_rows": rows, "snippets": snippets, "pass2": p2})
+        trace.update({"pass1_rows": rows, "snippets": snippets, "pass2": p2, "all_runs": runs_p2})
 
     out_rows, hard_stops, soft_gaps, strengths = [], [], [], []
-    for i, r in enumerate(skills):
-        m = by_id.get(i, {})
-        match = m.get("match") if m.get("match") in MATCH_TO_STATUS else "missing"
-        evidence = (m.get("evidence") or "").strip()
-        pool = cv if mode == "full" else " ".join(snippets[i])
-        # Source-of-truth boundary: a 'strong' must be backed by real resume text.
-        if match == "strong" and (not evidence or _overlap(evidence, pool) < 0.6):
-            match = "partial"
-        if match == "strong":
-            cov = item_coverage(r["text"], cv)  # a listed element the resume never mentions caps the row at partial
-            if cov is not None and cov < (1.0 if len(enumerated_items(r["text"])) <= 4 else 0.75):
-                match = "partial"
-        if match == "na":
+    for r, row in zip(skills, voted):
+        if row is None:
             continue
-        high = r["importance"] in ("critical", "high")
-        row = {
-            "text": r["text"], "importance": r["importance"], "evidence_tier": r["evidence_tier"],
-            "jd_signal": r["jd_signal"], "match": match, "status": MATCH_TO_STATUS[match],
-            "evidence": evidence if match != "missing" else "",
-            "interview_risk": m.get("interview_risk") or "",
-            "fix": m.get("mitigation") or "",
-            "hard_blocker": bool(m.get("hard_blocker")) and r["evidence_tier"] == "stated" and high and match != "strong",
-        }
         out_rows.append(row)
         if row["hard_blocker"]:
             hard_stops.append(r["text"])
-        elif match in ("missing", "partial"):
+        elif row["match"] in ("missing", "partial"):
             soft_gaps.append(r["text"])
-        elif match == "strong" and len(strengths) < 4:
+        elif row["match"] == "strong" and len(strengths) < 4:
             strengths.append(r["text"])
 
     # Sort: importance desc, then unmet before met (career-ops).
@@ -595,17 +656,21 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
     confidence = confidence_tier(score_evidence, jd_ok=len(jd.split()) >= 40)
     if unstable:
         confidence = "low"
+    elif confidence == "high" and any(r.get("disputed") and r["importance"] in ("critical", "high") for r in out_rows):
+        confidence = "medium"  # the judge runs disagreed on a requirement that matters
     # Holistic score from the model. Only clamped, never formula-capped (career-ops: confidence never changes the score).
-    score = round(sum(score_runs) / len(score_runs), 1)  # each run validated 1-5 by _generate_json; never defaulted
+    score = round(med, 1)  # median of validated 1-5 run scores (mean of two); never defaulted
 
     checklist = [CHECKLIST_BASE] + [f"Check the posting yourself: {r['text']}" for r in logistics]
     result = {
         "score": score,
         "confidence": confidence,
         "score_evidence": score_evidence,
-        "score_runs": score_runs,
-        "score_range": [min(score_runs), max(score_runs)],
+        "score_runs": scores,
+        "score_range": [min(scores), max(scores)],
         "unstable": unstable,
+        "runs": len(scores),
+        "usage": usage,
         "confidence_gaps": [g for g in p2.get("confidence_gaps", []) if isinstance(g, str)][:3],
         "dimensions": p2.get("dimensions", {}),
         "not_assessed": ["compensation", "culture"],
