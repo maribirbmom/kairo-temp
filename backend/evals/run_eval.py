@@ -11,6 +11,7 @@ Real resumes live in evals/golden/private/ (gitignored). Resumes are ALWAYS reda
 import argparse
 import asyncio
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -75,6 +76,8 @@ async def main():
     for mode, c in [(m, c) for c in load_cases(a.cases) for m in a.modes]:
         pairs_s, pairs_d = agg[mode]
         red, counts = redact(c["resume"], nlp)
+        for term in c.get("also_redact", []):  # belt and braces for real resumes: names/cities NER may miss
+            red = re.sub(re.escape(term), "[REDACTED]", red, flags=re.I)
         tr = {} if a.trace else None
         runs = []
         for k in range(a.repeats):

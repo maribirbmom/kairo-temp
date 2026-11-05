@@ -100,12 +100,21 @@ def requirement_metrics(pred: List[Dict], ref: List[Dict]) -> Dict[str, float]:
 
 
 def evidence_faithfulness(rows: List[Dict], resume_text: str) -> float:
-    """Share of 'strong' matches whose evidence is a verbatim span of the resume (anti-fabrication metric)."""
+    """Share of 'strong' matches whose evidence is real resume text (anti-fabrication metric).
+
+    Judges often stitch fragments with '...'; each fragment must be a verbatim span of the resume.
+    """
     strong = [r for r in rows if r.get("match") == "strong"]
     if not strong:
         return float("nan")
     pool = _norm(resume_text)
-    return mean(1.0 if len(_norm(r.get("evidence", ""))) >= 8 and _norm(r["evidence"]) in pool else 0.0 for r in strong)
+
+    def ok(ev: str) -> bool:
+        frags = [_norm(f) for f in re.split(r"\.{3}|\u2026", ev or "")]
+        frags = [f for f in frags if len(f) >= 4]
+        return bool(frags) and all(f in pool for f in frags)
+
+    return mean(1.0 if ok(r.get("evidence", "")) else 0.0 for r in strong)
 
 
 def stability(scores: Sequence[float]) -> Dict[str, float]:

@@ -54,3 +54,10 @@ def test_planted_pii_is_redacted_before_it_would_reach_the_llm():
     assert "Date of Birth" not in out and "Gender" not in out and "Marital" not in out
     assert "Python" in out and "RAG screener" in out, "skills must survive redaction"
     assert leak <= 0.2, out
+
+
+def test_faithfulness_accepts_stitched_fragments_but_not_invented_ones():
+    cv = "Built a RAG screener in Python. Skills: Docker, pytest. Intern Jan 2025."
+    ok = [{"match": "strong", "evidence": "Built a RAG screener in Python ... Docker, pytest"}]
+    bad = [{"match": "strong", "evidence": "Built a RAG screener in Python ... led 40 engineers at Google"}]
+    assert mt.evidence_faithfulness(ok, cv) == 1.0 and mt.evidence_faithfulness(bad, cv) == 0.0
