@@ -115,6 +115,14 @@ async def main():
         if rm:
             lines.append(f"requirements: coverage(crit/high) {f(rm['coverage_critical_high'])}, match acc {f(rm['match_accuracy'])}, "
                          f"gap P/R/F1 {f(rm['gap_precision'])}/{f(rm['gap_recall'])}/{f(rm['gap_f1'])} ({rm['aligned']} aligned)  ")
+        if ref:
+            for pr, rf in mt.align_requirements(base["requirements"], ref.get("requirements", [])):
+                if pr["match"] != rf["match"]:
+                    lines.append(f"  - differs: {rf['requirement'][:60]!r} reference {rf['match']}, kairo {pr['match']}")
+            ref_unmatched = [x for x in ref.get("requirements", []) if x["importance"] in ("critical", "high")
+                             and not any(rf is x for _, rf in mt.align_requirements(base["requirements"], ref["requirements"]))]
+            for x in ref_unmatched:
+                lines.append(f"  - not extracted: {x['requirement'][:70]!r} ({x['importance']})")
         if "metamorphic" in row:
             m = row["metamorphic"]
             lines.append(f"metamorphic: shuffle Δ{m['shuffle_delta']:+.1f}, PII Δ{m['pii_delta']:+.1f}, "

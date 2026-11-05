@@ -42,8 +42,9 @@ load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
 
 APPLY_THRESHOLD = 4.0
-ENGINE_VERSION = "careerops-v3"
+ENGINE_VERSION = "careerops-v5"
 LLM_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "")  # low|medium|high; empty = provider default
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 MAX_JD_CHARS = 8000
@@ -98,14 +99,48 @@ def _extract_json(raw: Optional[str]) -> Dict[str, Any]:
     return json.loads(raw)
 
 
-async def _generate_json(client, system: str, user: str) -> Dict[str, Any]:
-    resp = await client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        response_format={"type": "json_object"},
-        temperature=0,
-    )
-    return _extract_json(resp.choices[0].message.content)
+MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "8000"))  # reasoning models spend output budget thinking
+JSON_ATTEMPTS = 3
+
+
+def _missing(obj: Dict[str, Any], required: Tuple[str, ...]) -> List[str]:
+    bad = [k for k in required if k not in obj or obj[k] in (None, "", [], {})]
+    gs = obj.get("global_score")
+    if "global_score" in required and "global_score" not in bad:
+        try:
+            if not 1.0 <= float(gs) <= 5.0:
+                bad.append("global_score")
+        except (TypeError, ValueError):
+            bad.append("global_score")
+    return bad
+
+
+async def _generate_json(client, system: str, user: str, required: Tuple[str, ...] = ()) -> Dict[str, Any]:
+    """Ask for JSON and VERIFY it is complete. An incomplete reply is re-requested, never defaulted:
+    a missing global_score used to become 1.0 silently, which looked like a genuine 'Skip'."""
+    hint, last_err = "", "no attempt"
+    for _ in range(JSON_ATTEMPTS):
+        try:
+            resp = await client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user + hint}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_completion_tokens=MAX_TOKENS,
+                **({"extra_body": {"reasoning_effort": REASONING_EFFORT}} if REASONING_EFFORT else {}),
+            )
+            obj = _extract_json(resp.choices[0].message.content)
+        except Exception as e:  # malformed / rejected JSON is retried; auth, quota etc. is not
+            if type(e).__name__ not in ("JSONDecodeError", "ValueError", "BadRequestError"):
+                raise
+            last_err = f"{type(e).__name__}: {str(e)[:80]}"
+            continue
+        gaps = _missing(obj, required)
+        if not gaps:
+            return obj
+        last_err = "incomplete JSON, missing " + ", ".join(gaps)
+        hint = f"\n\nYour previous reply was incomplete (missing: {', '.join(gaps)}). Return the COMPLETE JSON object with every field."
+    raise ValueError(f"model did not return usable JSON after {JSON_ATTEMPTS} attempts ({last_err})")
 
 
 async def _embed(texts: List[str], task: str) -> np.ndarray:
@@ -147,6 +182,41 @@ def _norm(s: str) -> str:
 def _quote_in(text: str, quote: str) -> bool:
     q = _norm(quote)
     return len(q) >= 8 and q in _norm(text)
+
+
+def enumerated_items(requirement: str) -> List[str]:
+    """Elements listed in a requirement's parentheses or after a colon, excluding 'e.g.' examples."""
+    groups = re.findall(r"\(([^)]*)\)", requirement)
+    if ":" in requirement:
+        groups.append(requirement.split(":", 1)[1])
+    items: List[str] = []
+    for g in groups:
+        if re.match(r"\s*(e\.g\.|eg\b|such as|for example|incl)", g, re.I):
+            continue
+        for it in re.split(r",|;|\bor\b|\band\b|/", g):
+            it = it.strip(" .-\u2014")
+            if len(it) >= 3:
+                items.append(it)
+    return items
+
+
+def _stem(tok: str) -> str:
+    return tok[:5]
+
+
+def item_coverage(requirement: str, resume: str) -> Optional[float]:
+    """Share of enumerated elements whose content words appear in the resume; None if nothing is enumerated."""
+    items = enumerated_items(requirement)
+    if len(items) < 2:
+        return None
+    pool = {_stem(t) for t in _norm(resume).split() if len(t) > 2}
+    stop = {"basic", "working", "strong", "good", "knowledge", "understanding", "the", "and", "with"}
+    hit = 0
+    for it in items:
+        toks = [t for t in _norm(it).split() if len(t) > 2 and t not in stop]
+        if toks and all(_stem(t) in pool for t in toks):
+            hit += 1
+    return hit / len(items)
 
 
 def _overlap(evidence: str, pool: str) -> float:
@@ -237,7 +307,11 @@ PASS2_SYSTEM = (
     "either `resume` (the whole redacted resume, read all of it before judging any row) or per-row `resume_snippets`. "
     "If `target_roles` is given, judge north_star against those target roles; otherwise against the candidate's apparent trajectory. "
     "For each, set match: strong (clear evidence in the snippets) | partial (adjacent or weaker evidence) | missing (no evidence) | "
-    "na (not a claim about skills). A 'strong' REQUIRES `evidence` copied verbatim from the snippets; otherwise use partial. "
+    "na (not a claim about skills). First split the requirement into its distinct elements (e.g. 'prompting, embeddings, RAG, basic "
+    "evaluation' is four elements). 'strong' means EVERY element is shown by specific resume text, not merely the topic area; "
+    "if some elements are shown and others are absent, the row is partial and gap_note names the absent elements. Never credit a "
+    "skill the resume does not state (no inferring 'knows X' from 'knows Y'). A 'strong' REQUIRES `evidence` copied verbatim from the resume "
+    "(fragments joined by ' ... ' are fine); otherwise use partial. "
     "Importance guides what matters; it is not arithmetic. Be fair: wrongly telling a candidate not to apply is the costly error, "
     "so give credit for adjacent experience, projects, coursework and internships when the JD level allows it.\n"
     "For every partial/missing row that is critical or high you MUST give interview_risk (one specific sentence) and mitigation "
@@ -364,7 +438,7 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         raise ValueError("Resume has no usable text")
 
     # ---- Pass 1: JD only (importance is fixed here and never revised) ----
-    p1 = await _generate_json(client, PASS1_SYSTEM, f"<job_description>\n{jd}\n</job_description>")
+    p1 = await _generate_json(client, PASS1_SYSTEM, f"<job_description>\n{jd}\n</job_description>", ("requirements",))
     rows = _clean_requirements(p1.get("requirements", []), jd)
     expanded = []
     for r in rows:
@@ -405,7 +479,8 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
     }
     if mode == "full":
         payload["resume"] = cv
-    p2 = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload))
+    p2 = await _generate_json(client, PASS2_SYSTEM, json.dumps(payload),
+                              ("matches", "global_score", "dimensions", "score_evidence"))
     by_id = {m.get("id"): m for m in p2.get("matches", []) if isinstance(m, dict)}
     if trace is not None:
         trace.update({"pass1_rows": rows, "snippets": snippets, "pass2": p2})
@@ -419,6 +494,10 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
         # Source-of-truth boundary: a 'strong' must be backed by real resume text.
         if match == "strong" and (not evidence or _overlap(evidence, pool) < 0.6):
             match = "partial"
+        if match == "strong":
+            cov = item_coverage(r["text"], cv)  # a listed element the resume never mentions caps the row at partial
+            if cov is not None and cov < (1.0 if len(enumerated_items(r["text"])) <= 4 else 0.75):
+                match = "partial"
         if match == "na":
             continue
         high = r["importance"] in ("critical", "high")
@@ -447,7 +526,7 @@ async def screen(jd_text: str, resume_text: str, job_title: str = "", owner: str
                       for k in ("cv_match", "north_star", "red_flags")}
     confidence = confidence_tier(score_evidence, jd_ok=len(jd.split()) >= 40)
     # Holistic score from the model. Only clamped, never formula-capped (career-ops: confidence never changes the score).
-    score = round(max(1.0, min(5.0, float(p2.get("global_score") or 1.0))), 1)
+    score = round(float(p2["global_score"]), 1)  # validated 1-5 by _generate_json; never defaulted
 
     checklist = [CHECKLIST_BASE] + [f"Check the posting yourself: {r['text']}" for r in logistics]
     result = {

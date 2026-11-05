@@ -79,7 +79,7 @@ async def fake_embed(texts, task):
 def run_screen(monkeypatch, p1, p2, mode="rag", embed=None, target_roles=""):
     seen = {}
 
-    async def fake_json(client, system, user):
+    async def fake_json(client, system, user, required=()):
         if "JD-reading pass" in system:
             return p1
         seen["payload"] = user
@@ -140,3 +140,56 @@ def test_rag_mode_still_retrieves(monkeypatch):
 def test_target_roles_reach_the_judge(monkeypatch):
     _, seen = run_screen(monkeypatch, P1, P2, target_roles="AI/ML Engineer (fresher)")
     assert "AI/ML Engineer (fresher)" in seen["payload"]
+
+
+def test_enumerated_items_and_coverage():
+    req = "Working understanding of LLM fundamentals (prompting, embeddings, RAG, basic evaluation)"
+    assert scoring.enumerated_items(req) == ["prompting", "embeddings", "RAG", "basic evaluation"]
+    assert scoring.item_coverage(req, "Used prompting, embeddings and RAG in a project") == 0.75
+    assert scoring.item_coverage("Good Python skills", "python") is None
+    assert scoring.enumerated_items("Exposure to frameworks (e.g. Ragas, DeepEval)") == []
+
+
+def test_strong_is_capped_when_a_listed_element_is_missing(monkeypatch):
+    p1 = {"requirements": [{"requirement": "LLM fundamentals (prompting, embeddings, RAG, basic evaluation)", "kind": "skill",
+                            "importance": "high", "evidence": "structural", "jd_signal": "x"}]}
+    p2 = {"matches": [{"id": 0, "match": "strong", "evidence": "Semantic search with embeddings in Python"}],
+          "global_score": 4.0, "dimensions": {}, "score_evidence": {}}
+    res, _ = run_screen(monkeypatch, p1, p2, mode="full")
+    assert res["requirements"][0]["match"] == "partial"
+
+
+class _FakeResp:
+    def __init__(self, text):
+        self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
+
+
+class _FakeClient:
+    def __init__(self, replies):
+        self.replies, self.calls = list(replies), 0
+        self.chat = type("Ch", (), {"completions": self})()
+
+    async def create(self, **kw):
+        self.calls += 1
+        return _FakeResp(self.replies.pop(0))
+
+
+REQ = ("matches", "global_score", "dimensions", "score_evidence")
+GOOD = '{"matches":[{"id":0}],"global_score":4.1,"dimensions":{"cv_match":4},"score_evidence":{"cv_match":"supported"}}'
+
+
+def test_incomplete_json_is_retried_not_defaulted_to_one():
+    client = _FakeClient(['{"matches":[{"id":0}]}', GOOD])
+    out = asyncio.run(scoring._generate_json(client, "s", "u", REQ))
+    assert out["global_score"] == 4.1 and client.calls == 2
+
+
+def test_persistently_incomplete_json_raises_so_fallback_is_labelled():
+    client = _FakeClient(['{"matches":[1]}'] * 3)
+    with pytest.raises(ValueError):
+        asyncio.run(scoring._generate_json(client, "s", "u", REQ))
+
+
+def test_out_of_range_score_is_rejected():
+    client = _FakeClient([GOOD.replace("4.1", "9.5"), GOOD])
+    assert asyncio.run(scoring._generate_json(client, "s", "u", REQ))["global_score"] == 4.1
