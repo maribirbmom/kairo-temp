@@ -90,7 +90,7 @@ tmp_finfusion_code/
 outputs/
 scripts/
 memory/
-tests/
+/tests/
 test_reports/
 test_result.md
 backend_test.py
@@ -100,3 +100,10 @@ backend_test.py
 frontend/build/
 frontend/node_modules/
 backend/.venv/
+
+# Eval harness: real resumes and generated reports stay local
+backend/evals/golden/private/
+backend/evals/out/
+.venv/
+__pycache__/
+.pytest_cache/

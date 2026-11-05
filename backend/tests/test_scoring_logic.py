@@ -1,0 +1,123 @@
+"""Offline tests: no API key, no network, no model download. Fake LLM + hashed bag-of-words embeddings."""
+import asyncio
+import hashlib
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import scoring  # noqa: E402
+
+DUCK_GITHUB = ("A maintained personal GitHub profile with at least one substantive AI/LLM project "
+               "(academic or personal) — not a cloned tutorial.")
+
+
+def test_compound_github_requirement_is_split():
+    skill, link = scoring.split_link_clause(DUCK_GITHUB)
+    assert "project" in skill.lower() and "github" not in skill.lower()
+    assert "link" in link.lower()
+
+
+def test_pure_link_requirement_is_not_split():
+    assert scoring.split_link_clause("Share your resume along with your GitHub profile link.") is None
+
+
+def test_entry_level_detection():
+    assert scoring.is_entry_level("candidates with 0 to 2 years of experience")
+    assert scoring.is_entry_level("We hire freshers and new grads")
+    assert not scoring.is_entry_level("8+ years leading distributed systems teams")
+
+
+def test_stated_requires_verbatim_quote_and_inferred_never_critical():
+    jd = "You must have strong Python skills. Nice to have: Docker."
+    rows = scoring._clean_requirements([
+        {"requirement": "Python", "importance": "critical", "evidence": "stated", "jd_signal": "strong Python skills"},
+        {"requirement": "Kubernetes", "importance": "critical", "evidence": "stated", "jd_signal": "invented quote"},
+        {"requirement": "Leadership", "importance": "high", "evidence": "inferred", "jd_signal": None},
+    ], jd)
+    assert rows[0]["importance"] == "critical" and rows[0]["evidence_tier"] == "stated"
+    assert rows[1]["evidence_tier"] == "inferred" and rows[1]["importance"] == "meaningful"
+    assert rows[2]["importance"] == "meaningful"
+
+
+@pytest.mark.parametrize("score,conf,stops,expect", [
+    (4.3, "high", [], "Apply"), (4.0, "low", [], "Apply"), (4.2, "medium", ["x"], "Consider"),
+    (3.7, "low", [], "Research first"), (3.7, "high", [], "Consider"), (3.4, "high", [], "Skip"),
+])
+def test_decision_rules(score, conf, stops, expect):
+    assert scoring.decide(score, conf, stops)["decision"] == expect
+
+
+def test_confidence_never_changes_score_path():
+    assert scoring.confidence_tier({"cv_match": "unknown", "north_star": "supported", "red_flags": "supported"}, True) == "low"
+    assert scoring.confidence_tier({"cv_match": "supported", "north_star": "supported", "red_flags": "supported"}, True) == "high"
+
+
+def test_fallback_is_labelled_and_explains_itself():
+    r = scoring.heuristic_fallback(60.0, reason="RateLimitError: 429")
+    assert r["engine"] == "heuristic" and r["confidence"] == "low" and "429" in r["fallback_reason"]
+    assert r["score"] <= 3.9
+
+
+# ---- full pipeline with a fake LLM -------------------------------------------------
+
+JD = ("Associate ML Engineer (0-2 years), early-career. Required: strong Python fundamentals; must have a substantive "
+      "ML project on GitHub. " + "filler " * 40)
+CV = "PROJECTS\nSemantic search with embeddings in Python using FastAPI and cosine retrieval\nSKILLS\nPython SQL Docker"
+
+
+async def fake_embed(texts, task):
+    out = np.zeros((len(texts), 64), dtype=np.float32)
+    for i, t in enumerate(texts):
+        for w in t.lower().split():
+            out[i, int(hashlib.md5(w.encode()).hexdigest(), 16) % 64] += 1
+    return out / (np.linalg.norm(out, axis=1, keepdims=True) + 1e-9)
+
+
+def run_screen(monkeypatch, p1, p2):
+    seen = {}
+
+    async def fake_json(client, system, user):
+        if "JD-reading pass" in system:
+            return p1
+        seen["payload"] = user
+        return p2
+
+    monkeypatch.setattr(scoring, "_client", lambda: object())
+    monkeypatch.setattr(scoring, "_generate_json", fake_json)
+    monkeypatch.setattr(scoring, "_embed", fake_embed)
+    scoring._cache.clear()
+    return asyncio.run(scoring.screen(JD, CV, "Associate ML Engineer", owner="t")), seen
+
+
+P1 = {"role_summary": {"archetype": "ml"}, "requirements": [
+    {"requirement": "Strong Python fundamentals", "kind": "skill", "importance": "critical", "evidence": "stated",
+     "jd_signal": "strong Python fundamentals"},
+    {"requirement": DUCK_GITHUB, "kind": "skill", "importance": "critical", "evidence": "inferred", "jd_signal": None},
+]}
+P2 = {"matches": [{"id": 0, "match": "strong", "evidence": "Python SQL Docker"},
+                  {"id": 1, "match": "strong", "evidence": "text that is not in the resume at all"}],
+      "dimensions": {"cv_match": 4, "north_star": 4, "red_flags": 5},
+      "score_evidence": {"cv_match": "supported", "north_star": "supported", "red_flags": "supported"},
+      "global_score": 4.4, "red_flags": [], "summary": "ok", "next_action": "apply"}
+
+
+def test_pipeline_downgrades_unbacked_strong_and_keeps_link_out_of_score(monkeypatch):
+    res, seen = run_screen(monkeypatch, P1, P2)
+    by_text = {r["text"]: r for r in res["requirements"]}
+    assert all("github" not in t.lower() for t in by_text), "link clause must not be a scored requirement"
+    assert any("project" in t.lower() for t in by_text)
+    unbacked = [r for r in res["requirements"] if "project" in r["text"].lower()][0]
+    assert unbacked["match"] == "partial", "strong without resume-backed evidence must be downgraded"
+    assert any("GitHub" in c for c in res["checklist"]), "link goes to the before-you-apply checklist"
+    assert '"candidate_level_expected": "entry"' in seen["payload"]
+    assert res["score"] == 4.4 and res["decision"] == "Apply"
+
+
+def test_judge_always_sees_nearest_chunk(monkeypatch):
+    p1 = {"requirements": [{"requirement": "Kubernetes operators", "kind": "skill", "importance": "high",
+                            "evidence": "structural", "jd_signal": "section"}]}
+    _, seen = run_screen(monkeypatch, p1, {"matches": [], "global_score": 2.0})
+    assert '"resume_snippets": []' not in seen["payload"]
