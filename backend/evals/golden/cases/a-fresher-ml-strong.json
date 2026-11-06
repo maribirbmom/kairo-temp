@@ -1,0 +1,48 @@
+{
+  "id": "a-fresher-ml-strong",
+  "title": "Associate ML Engineer",
+  "jd": "Associate ML Engineer (0-2 years), Northwind Analytics, Bengaluru\nWe are hiring early-career engineers to build and ship machine learning features.\n\nWhat you will do\n- Train, evaluate and iterate on ML models for ranking and classification.\n- Build data pipelines and feature tables in SQL and Python.\n- Write clean, tested code and document experiments.\n\nRequired\n- Strong Python and ML fundamentals (scikit-learn or PyTorch).\n- At least one end-to-end ML project, academic or personal, not a cloned tutorial.\n- Working SQL.\n- Understanding of model evaluation metrics (precision, recall, AUC) and train/validation splits.\n\nGood to have\n- Docker or any cloud platform.\n- Experience with LLMs or retrieval (RAG).\n- Exposure to MLOps tooling (MLflow, experiment tracking).",
+  "resume": "Test Candidate A\nEDUCATION\nB.Tech Computer Science, 2026, CGPA 8.4/10. Coursework: Machine Learning, Statistics, Databases, Data Structures.\nEXPERIENCE\nML Intern, Summer 2025 (3 months), a retail analytics startup\n- Built a pandas and SQL pipeline that produced weekly feature tables for a churn model.\n- Trained an XGBoost churn classifier, reaching AUC 0.81 on a held-out month; compared against a logistic regression baseline.\nPROJECTS\nDocument question answering with RAG: sentence embeddings plus cosine retrieval served through FastAPI, evaluated with recall@5 on 200 hand-labelled questions.\nSentiment classifier: fine-tuned DistilBERT on 20k reviews in PyTorch, reported precision, recall and F1 per class.\nSKILLS\nPython, SQL, scikit-learn, PyTorch, pandas, FastAPI, Docker, Git",
+  "note": "Fresher with evidence for every required item. Expect Apply.",
+  "reference": {
+    "score": 4.5,
+    "decision": "Apply",
+    "requirements": [
+      {
+        "requirement": "Strong Python and ML fundamentals",
+        "importance": "critical",
+        "match": "strong"
+      },
+      {
+        "requirement": "At least one end-to-end ML project, not a cloned tutorial",
+        "importance": "critical",
+        "match": "strong"
+      },
+      {
+        "requirement": "Working SQL",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Understanding of model evaluation metrics precision recall AUC and validation splits",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Docker or any cloud platform",
+        "importance": "preferred",
+        "match": "partial"
+      },
+      {
+        "requirement": "Experience with LLMs or retrieval RAG",
+        "importance": "preferred",
+        "match": "strong"
+      },
+      {
+        "requirement": "Exposure to MLOps tooling MLflow experiment tracking",
+        "importance": "preferred",
+        "match": "missing"
+      }
+    ]
+  }
+}

@@ -21,7 +21,7 @@ const FitScore = ({ screening, fallbackPercent = 0 }) => {
     );
   }
 
-  const { score, label, confidence, engine } = screening;
+  const { score, label, confidence, engine, score_range: range, unstable, fallback_reason: fallbackReason } = screening;
   const decision = screening.decision || (screening.verdict === 'apply' ? 'Apply' : 'Skip');
   const t = TONES[decision] || TONES.Skip;
 
@@ -42,6 +42,14 @@ const FitScore = ({ screening, fallbackPercent = 0 }) => {
       </div>
 
       <p className="text-sm text-text-muted">{label}</p>
+      {range && range[0] !== range[1] && (
+        <p className="text-xs text-text-muted" data-testid="score-range">
+          {unstable ? 'Two runs disagreed: ' : 'Across two runs: '}{range[0].toFixed(1)} to {range[1].toFixed(1)}
+        </p>
+      )}
+      {fallbackReason && (
+        <p className="text-xs text-amber-700" data-testid="fallback-reason">AI scoring was unavailable ({fallbackReason}).</p>
+      )}
       <p className="text-xs text-text-muted/80">
         Evidence confidence: <span className="font-semibold capitalize">{confidence}</span>
         {engine === 'heuristic' && ' · keyword estimate only'}

@@ -210,7 +210,7 @@ const ScreeningResults = () => {
                             <p className="text-sm font-bold text-text-main truncate max-w-[150px]">{resume.filename}</p>
                             <p className="text-xs text-text-muted">
                               {resume.screening?.score != null
-                                ? `${resume.screening.score.toFixed(1)} / 5 • ${resume.verdict === 'apply' ? 'Apply' : 'Skip'}`
+                                ? `${resume.screening.score.toFixed(1)} / 5 • ${resume.decision || (resume.verdict === 'apply' ? 'Apply' : 'Skip')}`
                                 : `${Math.round(resume.match_score || 0)}% Match`}
                             </p>
                           </div>

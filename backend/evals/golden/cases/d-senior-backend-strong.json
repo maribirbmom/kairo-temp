@@ -1,0 +1,48 @@
+{
+  "id": "d-senior-backend-strong",
+  "title": "Senior Backend Engineer",
+  "jd": "Senior Backend Engineer, Lattice Cloud, Remote (India)\nYou will lead the design of our event-driven platform.\n\nRequired\n- 5+ years of professional backend engineering experience.\n- Experience designing and operating distributed systems and microservices.\n- Strong PostgreSQL or equivalent SQL database skills.\n- Production experience with AWS.\n- Mentoring other engineers.\n\nGood to have\n- Kubernetes.\n- Observability tooling (Prometheus, Grafana).",
+  "resume": "Test Candidate D\nEXPERIENCE\nSenior Software Engineer, 2022-present, a logistics platform\n- Led a team of four engineers building order-routing microservices in Go, handling 3k requests/second.\n- Reduced p99 latency by 40% by redesigning PostgreSQL indexes and adding read replicas.\n- Introduced Kafka-based events between services; wrote the on-call runbook and mentored two junior engineers.\nSoftware Engineer, 2019-2022, a fintech company\n- Built Python REST services on AWS (ECS, RDS, SQS) and set up Prometheus and Grafana dashboards.\n- Deployed services to EKS with Helm.\nEDUCATION\nB.E. Computer Engineering, 2019.\nSKILLS\nGo, Python, PostgreSQL, Kafka, AWS, Docker, Prometheus, Grafana",
+  "note": "Experienced engineer matching a senior role. Expect Apply. Guards against fresher-only tuning.",
+  "reference": {
+    "score": 4.6,
+    "decision": "Apply",
+    "requirements": [
+      {
+        "requirement": "5+ years of professional backend engineering experience",
+        "importance": "critical",
+        "match": "strong"
+      },
+      {
+        "requirement": "Designing and operating distributed systems and microservices",
+        "importance": "critical",
+        "match": "strong"
+      },
+      {
+        "requirement": "Strong PostgreSQL or equivalent SQL database skills",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Production experience with AWS",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Mentoring other engineers",
+        "importance": "high",
+        "match": "strong"
+      },
+      {
+        "requirement": "Kubernetes",
+        "importance": "preferred",
+        "match": "partial"
+      },
+      {
+        "requirement": "Observability tooling Prometheus Grafana",
+        "importance": "preferred",
+        "match": "strong"
+      }
+    ]
+  }
+}

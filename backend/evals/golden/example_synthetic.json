@@ -1,0 +1,16 @@
+{
+  "id": "synthetic-entry-ml",
+  "title": "Associate ML Engineer",
+  "jd": "Associate ML Engineer (0-2 years). We are hiring early-career engineers.\n\nRequired:\n- Strong Python fundamentals and data structures.\n- Working understanding of embeddings and retrieval (RAG).\n- At least one substantive ML project on GitHub, not a cloned tutorial.\n\nGood to have:\n- Exposure to Docker or any cloud platform.\n- Experience with evaluation metrics such as precision and recall.\n",
+  "resume": "Asha Rao\nasha@example.com\n\nEDUCATION\nB.E. Computer Science, 2026\n\nPROJECTS\nSemantic search over support tickets: embeddings plus cosine retrieval in Python, evaluated with precision@5.\nDigit classifier from scratch in NumPy.\n\nSKILLS\nPython, SQL, Docker, FastAPI\n",
+  "reference": {
+    "score": 4.3, "decision": "Apply",
+    "requirements": [
+      {"requirement": "Strong Python fundamentals and data structures", "importance": "critical", "match": "strong"},
+      {"requirement": "Working understanding of embeddings and retrieval RAG", "importance": "high", "match": "strong"},
+      {"requirement": "At least one substantive ML project not a cloned tutorial", "importance": "critical", "match": "strong"},
+      {"requirement": "Exposure to Docker or any cloud platform", "importance": "preferred", "match": "partial"},
+      {"requirement": "Evaluation metrics such as precision and recall", "importance": "preferred", "match": "strong"}
+    ]
+  }
+}

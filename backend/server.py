@@ -696,7 +696,7 @@ async def analyze_session(session_id: str, user: dict = Depends(current_user)):
             screening = await scoring.screen(jd_text, resume_text, session.get('job_title', ''), owner=user['id'])
         except Exception as e:
             logger.error(f"RAG screening failed, using fallback: {e}")
-            screening = scoring.heuristic_fallback(match_score)
+            screening = scoring.heuristic_fallback(match_score, reason=f"{type(e).__name__}: {str(e)[:120]}")
 
         gap_details = [
             r for r in screening.get("requirements", [])
