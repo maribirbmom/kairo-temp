@@ -9,7 +9,6 @@ import pytest
 os.environ.pop("MONGO_URL", None)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 pytest.importorskip("fastapi")
-pytest.importorskip("spacy")
 from fastapi.testclient import TestClient  # noqa: E402
 import server  # noqa: E402
 import scoring  # noqa: E402

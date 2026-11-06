@@ -72,6 +72,9 @@ def _find_name(text: str, nlp) -> Optional[str]:
             if ent.label_ == "PERSON" and 3 <= len(ent.text) <= 40 and "\n" not in ent.text.strip():
                 return ent.text.strip()
     first = next((l.strip() for l in text.splitlines() if l.strip()), "")
+    # "# CV -- Asha Rao", "Resume: Asha Rao", "**Name:** Asha Rao" -> "Asha Rao"
+    first = re.sub(r"^[#*\s]+", "", first)
+    first = re.sub(r"^(?:cv|resume|curriculum vitae|name)\s*[*]*\s*(?:[:\-\u2013\u2014|]+\s*)+[*]*\s*", "", first, flags=re.I).strip(" *")
     lead = re.split(r"\s+[-\u2013\u2014|]\s+|\s*,\s+|\s*\|\s*", first)[0].strip()
     if lead != first and TITLE_CASE_NAME.match(lead) and not re.search(r"\d|resume|curriculum|vitae", lead, re.I):
         return lead

@@ -68,3 +68,10 @@ def test_faithfulness_accepts_condensed_lists_but_not_invented_claims():
     condensed = [{"match": "strong", "evidence": "coursework: Deep Learning, AI/ML, NLP"}]
     invented = [{"match": "strong", "evidence": "Led a Kubernetes migration for 40 engineers"}]
     assert mt.evidence_faithfulness(condensed, cv) == 1.0 and mt.evidence_faithfulness(invented, cv) == 0.0
+
+
+def test_name_is_found_behind_cv_prefix_and_markdown():
+    for header in ("# CV -- Asha Rao", "Resume: Asha Rao", "**Name:** Asha Rao", "Asha Rao"):
+        out, counts = redact(f"{header}\nasha.rao@example.com\nPython developer, built Asha Rao tools", nlp=None)
+        assert "Asha" not in out and "Rao" not in out, (header, out)
+        assert counts.get("name", 0) >= 1

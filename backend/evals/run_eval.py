@@ -25,11 +25,8 @@ OUT = Path(__file__).parent / "out"
 
 
 def _nlp():
-    try:
-        import spacy
-        return spacy.load("en_core_web_sm")
-    except Exception:
-        return None
+    """Production redaction no longer uses spaCy (rule-based only), so the evals measure that same path."""
+    return None
 
 
 def load_cases(paths):
