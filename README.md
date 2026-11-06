@@ -93,3 +93,18 @@ mean absolute error 0.35 points vs the reference labels, Apply/not-Apply agreeme
 - Free-tier model limits (about 200K tokens/day per model on Groq) cap how many evaluations the public demo can serve.
 
 Inspired by [career-ops](https://github.com/career-ops-hq/career-ops) (MIT). Kairo is independent and not affiliated with it.
+
+### CV Coach: apply suggestions to your CV
+
+The coach proposes concrete rewrites; the code, not the model, decides what is allowed:
+- an edit's "original" must exist exactly once in your CV, so it can be applied precisely;
+- a suggestion that adds numbers or tool/employer names your CV does not contain is flagged, and cannot be applied
+  until you tick "I confirm these are true";
+- applying works from stored, verified edits by id (the browser cannot send arbitrary text), is undoable, and the
+  edited CV can be re-scored or downloaded as text. Contact details were redacted on upload, so you can type a header
+  at download time; it stays in your browser.
+- the coach remembers the recent conversation, sees your edited CV, and returns an honest error if the model is unavailable.
+- model output is HTML-escaped before display.
+
+`python -m evals.coach_eval` runs an adversarial set (fake-skill requests, a missing requirement, a posting that
+tries to inject an instruction, metric invention) and reports both what the model did and what the code blocks.
