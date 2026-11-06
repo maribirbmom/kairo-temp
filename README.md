@@ -73,7 +73,7 @@ Never set `DEV_AUTH` in production.
 
 Kairo's scoring follows the career-ops method (two-pass JD-first reading, importance bands, evidence tiers, a single
 holistic 1-5 score, Apply at 4.0 or above). Because an LLM judges the fit, the repo ships an evaluation harness
-(`backend/evals/`) and runs 38 offline tests in CI (`backend/tests`, no API key needed).
+(`backend/evals/`) and 38 offline tests (`backend/tests`, no API key needed; run `cd backend && python -m pytest`).
 
 **How trust is built**
 - A "strong" match must quote the resume verbatim (checked in code, not by the model).
