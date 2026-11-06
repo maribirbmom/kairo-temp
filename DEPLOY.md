@@ -45,3 +45,5 @@ users) can sign in.
 - `CORS_ORIGINS` is the exact frontend URL (not `*`).
 - Sign in with a second Google account and confirm you cannot see the first account's data.
 - Rotate any password that was ever pasted into chat or a ticket.
+
+Deploy note: `backend/vercel.json` raises the function limit to 60 s (scoring makes 2-4 model calls; confirm your plan allows it) and excludes tests/evals from the bundle. `fastembed` is not installed by default because the default evidence mode (`full`) does not use embeddings; install it only for `KAIRO_EVIDENCE_MODE=rag`.

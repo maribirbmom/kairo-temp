@@ -10,7 +10,7 @@ dnspython==2.8.0
 openai==1.99.9
 httpx==0.28.1
 numpy==2.4.0
-fastembed==0.9.1
+# fastembed==0.9.1  # only for KAIRO_EVIDENCE_MODE=rag (not the default); drops ~100+ MB and a 67 MB cold-start download
 pdfplumber==0.11.9
 python-docx==1.2.0
 PyJWT==2.10.1
