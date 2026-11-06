@@ -95,6 +95,13 @@ NON_CONTACT = re.compile(r"\b(skills?|technolog|languages?|tools?|frameworks?|su
 
 CITY_STATE = re.compile(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+){0,2},\s*(?:[A-Z][a-z]+(?: [A-Z][a-z]+){0,2}|[A-Z]{2})\b")
 TITLE_SEG = re.compile(r"^[A-Z][a-z]+(?: [A-Z][a-z]+){0,2}$")
+# Words that mean a segment is a subject/skill, never a place ("Machine Learning, Statistics" is not "City, State").
+NOT_A_PLACE = {"learning", "science", "sciences", "engineering", "technology", "technologies", "structures", "statistics",
+               "databases", "database", "analytics", "development", "computer", "data", "design", "systems", "mathematics",
+               "algorithms", "intelligence", "networks", "management", "software", "machine", "cloud", "security", "applied",
+               "operating", "discrete", "deep", "natural", "language", "processing", "vision", "robotics", "electronics"}
+EDU_LINE = re.compile(r"\b(b\.?\s?tech|b\.?\s?e|m\.?\s?tech|b\.?\s?sc|m\.?\s?sc|bachelor|master|degree|cgpa|gpa|coursework|"
+                      r"university|college|institute|school|education|certif\w*|intern\w*|projects?)\b", re.I)
 PLACEHOLDER = re.compile(r"\[(?:EMAIL|PHONE|LINK|NAME|ADDRESS|POSTCODE)\]")
 
 
@@ -108,13 +115,14 @@ def _redact_header_locations_heuristic(s: str, counts) -> str:
         seen += 1
         if seen > 5:
             break
-        if NON_CONTACT.search(line) or len(line) > 140:
+        if NON_CONTACT.search(line) or EDU_LINE.search(line) or len(line) > 140:
             continue
         contact_like = bool(PLACEHOLDER.search(line)) or bool(re.search(r"\b\d{5,6}\b", line)) or CITY_STATE.search(line)
         if not contact_like:
             continue
         def city_state(m):
-            if m.group().split(",")[0].strip().lower() in TECH_ALLOW:
+            words = {w.lower().strip(",") for w in m.group().split()}
+            if m.group().split(",")[0].strip().lower() in TECH_ALLOW or words & NOT_A_PLACE:
                 return m.group()
             counts["location"] += 1
             return "[LOCATION]"

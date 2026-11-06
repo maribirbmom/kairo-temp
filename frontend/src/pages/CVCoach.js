@@ -171,12 +171,12 @@ const CVCoach = () => {
       const res = await axios.post(`${API}/coach/undo`, { resume_id: resumeId });
       setCvText(res.data.text);
       setCvEdited(res.data.edited);
-      setMessages(prev => prev.map(m => ({ ...m, edits: (m.edits || []).map(e => ({ ...e })) })));
       const hist = await axios.get(`${API}/coach/history/${resumeId}`);
-      setMessages(hist.data.map(m => ({ ...m })));
+      const list = Array.isArray(hist.data) ? hist.data : (hist.data.messages || []);
+      setMessages(list.map(m => ({ ...m })));
       setNotice('Last change undone.');
     } catch (err) {
-      setNotice(err.response?.data?.detail || 'Nothing to undo.');
+      setNotice(err.response?.data?.detail || 'Could not undo right now. Please try again.');
     }
   };
 

@@ -75,3 +75,13 @@ def test_name_is_found_behind_cv_prefix_and_markdown():
         out, counts = redact(f"{header}\nasha.rao@example.com\nPython developer, built Asha Rao tools", nlp=None)
         assert "Asha" not in out and "Rao" not in out, (header, out)
         assert counts.get("name", 0) >= 1
+
+
+def test_subject_lines_are_not_mistaken_for_locations_but_real_ones_still_are():
+    cv = ("Asha Rao\nasha@example.com | Pune, Maharashtra\nB.Tech Computer Science, 2026. Coursework: Machine Learning, Statistics, Databases\n"
+          "SKILLS\nPython")
+    out, counts = redact(cv, nlp=None)
+    assert "Machine Learning" in out and "Statistics" in out, out
+    assert "Pune" not in out and "Maharashtra" not in out, out
+    out2, _ = redact("Asha Rao\nasha@example.com\nComputer Science, Data Structures, Machine Learning", nlp=None)
+    assert "Data Structures" in out2 and "Machine Learning" in out2
