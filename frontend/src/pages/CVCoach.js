@@ -7,10 +7,19 @@ import RequirementGaps from '../components/RequirementGaps';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+const escapeHtml = (str) => String(str ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 const CVCoach = () => {
   const { sessionId, resumeId } = useParams();
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
+  const [cvText, setCvText] = useState(null);          // CV text after applied edits (null = unchanged)
+  const [cvEdited, setCvEdited] = useState(false);
+  const [busyEdit, setBusyEdit] = useState(null);
+  const [ackIds, setAckIds] = useState({});
+  const [notice, setNotice] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [session, setSession] = useState(null);
   const [resume, setResume] = useState(null);
@@ -32,6 +41,8 @@ const CVCoach = () => {
       
       setSession(sessionRes.data);
       setResume(resumeRes.data);
+      setCvText(resumeRes.data.edited_text || null);
+      setCvEdited(!!resumeRes.data.edited_text);
       
       if (historyRes.data.messages && historyRes.data.messages.length > 0) {
         setMessages(historyRes.data.messages);
@@ -108,6 +119,8 @@ const CVCoach = () => {
         role: 'assistant',
         content: response.data.content,
         suggestion_type: response.data.suggestion_type,
+        edits: response.data.edits || [],
+        warnings: response.data.warnings || [],
       };
       
       setMessages(prev => [...prev, assistantMessage]);
@@ -116,7 +129,7 @@ const CVCoach = () => {
       const errorMessage = {
         id: `error-${Date.now()}`,
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: error.response?.data?.detail || 'Sorry, I encountered an error. Please try again.',
         suggestion_type: 'error',
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -124,6 +137,104 @@ const CVCoach = () => {
       setIsLoading(false);
     }
   };
+
+  const markApplied = (messageId, ids, value) =>
+    setMessages(prev => prev.map(m => m.id !== messageId ? m : {
+      ...m, edits: (m.edits || []).map(e => ids.includes(e.id) ? { ...e, applied: value } : e),
+    }));
+
+  const applyEdit = async (message, edit) => {
+    setBusyEdit(edit.id);
+    setNotice('');
+    try {
+      const res = await axios.post(`${API}/coach/apply`, {
+        resume_id: resumeId, message_id: message.id, edit_ids: [edit.id],
+        acknowledge: ackIds[edit.id] ? [edit.id] : [],
+      });
+      if (res.data.applied.includes(edit.id)) {
+        markApplied(message.id, [edit.id], true);
+        setCvText(res.data.text);
+        setCvEdited(res.data.edited);
+        setNotice('Applied to your CV. Re-score to see the effect, or download it.');
+      } else {
+        setNotice(res.data.skipped?.[0]?.reason || 'That change could not be applied.');
+      }
+    } catch (err) {
+      setNotice(err.response?.data?.detail || 'Could not apply that change.');
+    } finally {
+      setBusyEdit(null);
+    }
+  };
+
+  const undoLast = async () => {
+    try {
+      const res = await axios.post(`${API}/coach/undo`, { resume_id: resumeId });
+      setCvText(res.data.text);
+      setCvEdited(res.data.edited);
+      setMessages(prev => prev.map(m => ({ ...m, edits: (m.edits || []).map(e => ({ ...e })) })));
+      const hist = await axios.get(`${API}/coach/history/${resumeId}`);
+      setMessages(hist.data.map(m => ({ ...m })));
+      setNotice('Last change undone.');
+    } catch (err) {
+      setNotice(err.response?.data?.detail || 'Nothing to undo.');
+    }
+  };
+
+  const rescore = async () => {
+    setNotice('Re-scoring your edited CV...');
+    try {
+      await axios.post(`${API}/sessions/${sessionId}/analyze`);
+      const res = await axios.get(`${API}/resumes/${resumeId}`);
+      setResume(res.data);
+      setNotice('Score updated.');
+    } catch (err) {
+      setNotice(err.response?.data?.detail || 'Could not re-score right now.');
+    }
+  };
+
+  const downloadCv = () => {
+    const header = window.prompt('Optional: type your name and contact line to put at the top. It stays in your browser and is never uploaded.', '') || '';
+    const body = (cvText || resume?.edited_text || resume?.extracted_text || '');
+    const blob = new Blob([(header ? header + '\n\n' : '') + body], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'updated-cv.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const renderEdits = (message) => (message.edits?.length || message.warnings?.length) ? (
+    <div className="mt-3 flex flex-col gap-3" data-testid="coach-edits">
+      {(message.edits || []).map((edit) => (
+        <div key={edit.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-soft">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-text-muted mb-1">Your CV now</p>
+          <p className="text-sm text-text-muted line-through whitespace-pre-wrap">{edit.original}</p>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-success mt-3 mb-1">Suggested</p>
+          <p className="text-sm text-text-main whitespace-pre-wrap">{edit.suggested}</p>
+          {edit.reason && <p className="text-xs text-text-muted mt-2">{edit.reason}</p>}
+          {edit.needs_ack && !edit.applied && (
+            <label className="mt-3 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 rounded-lg p-2">
+              <input type="checkbox" checked={!!ackIds[edit.id]} onChange={(e) => setAckIds(a => ({ ...a, [edit.id]: e.target.checked }))} />
+              <span>
+                This adds details that are not in your CV ({[...(edit.new_terms || []), ...(edit.new_numbers || [])].join(', ')}).
+                I confirm they are true.
+              </span>
+            </label>
+          )}
+          <button
+            type="button"
+            disabled={edit.applied || busyEdit === edit.id || (edit.needs_ack && !ackIds[edit.id])}
+            onClick={() => applyEdit(message, edit)}
+            className="mt-3 rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-white disabled:opacity-40"
+            data-testid="apply-edit"
+          >
+            {edit.applied ? 'Applied' : busyEdit === edit.id ? 'Applying...' : 'Apply to my CV'}
+          </button>
+        </div>
+      ))}
+      {(message.warnings || []).map((w, i) => <p key={i} className="text-xs text-amber-700">{w}</p>)}
+    </div>
+  ) : null;
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -146,7 +257,7 @@ const CVCoach = () => {
   const formatMessage = (content) => {
     if (!content) return '';
     
-    let formatted = content;
+    let formatted = escapeHtml(content);
     
     // Remove ### markdown headers and style them
     formatted = formatted.replace(/^###\s*(\d+\.?\s*)?(.+)$/gm, '<h4 class="text-lg font-bold text-text-main mt-4 mb-2 flex items-center gap-2"><span class="text-primary">$1</span>$2</h4>');
@@ -250,6 +361,7 @@ const CVCoach = () => {
                 className="text-text-main text-[15px] leading-relaxed prose prose-sm max-w-none"
                 dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }}
               />
+              {renderEdits(message)}
             </div>
           )}
           <span className="text-[10px] font-bold text-text-muted ml-2">AI Coach • Just now</span>
@@ -316,6 +428,18 @@ const CVCoach = () => {
                   Based on your resume vs the job description. Fixes only use real experience, never invent any.
                 </p>
                 <RequirementGaps requirements={resume.screening.requirements} />
+              </div>
+            )}
+            {(cvEdited || notice) && (
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 flex flex-wrap items-center gap-3" data-testid="cv-toolbar">
+                <span className="text-sm text-text-main flex-1 min-w-[12rem]">{notice || 'Your CV has unsaved edits.'}</span>
+                {cvEdited && (
+                  <>
+                    <button type="button" onClick={undoLast} className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs font-bold">Undo last</button>
+                    <button type="button" onClick={rescore} className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs font-bold">Re-score</button>
+                    <button type="button" onClick={downloadCv} className="rounded-full bg-primary px-4 py-1.5 text-xs font-bold text-white">Download updated CV</button>
+                  </>
+                )}
               </div>
             )}
             {messages.map(renderMessage)}
