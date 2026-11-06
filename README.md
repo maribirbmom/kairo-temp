@@ -68,3 +68,28 @@ Never set `DEV_AUTH` in production.
 - Scores are an AI-assisted estimate, not a prediction of hiring outcomes.
 - The score can vary slightly between runs.
 - Redaction can miss unusual formats or non-English resumes.
+
+## Evaluation and known limits
+
+Kairo's scoring follows the career-ops method (two-pass JD-first reading, importance bands, evidence tiers, a single
+holistic 1-5 score, Apply at 4.0 or above). Because an LLM judges the fit, the repo ships an evaluation harness
+(`backend/evals/`) and runs 38 offline tests in CI (`backend/tests`, no API key needed).
+
+**How trust is built**
+- A "strong" match must quote the resume verbatim (checked in code, not by the model).
+- Years of experience are computed from dated resume entries in code, not by the model.
+- Incomplete model output is retried, never defaulted; an unavailable model is shown as a labelled keyword estimate.
+- Borderline scores get extra judge runs; the median is shown with its range, and disagreement becomes "Research first".
+- Personal details are redacted before anything is sent to the model, and are never scored as missing.
+
+**Measured on six synthetic candidate/JD pairs** (`backend/evals/golden/cases`, `openai/gpt-oss-120b`, 2 repeats):
+mean absolute error 0.35 points vs the reference labels, Apply/not-Apply agreement 5 of 6 cases, rank correlation 0.99.
+
+**Limits, stated plainly**
+- The reference labels were written by hand by applying the career-ops rubric (AI-assisted). They are a regression
+  suite, not independent ground truth. Six cases are too few to claim general accuracy.
+- Scores can run high on "preferred" requirements; one case labelled 3.9 scored 4.3.
+- Compensation and culture are not scored (they need company research). Redaction is best effort and English-centred.
+- Free-tier model limits (about 200K tokens/day per model on Groq) cap how many evaluations the public demo can serve.
+
+Inspired by [career-ops](https://github.com/career-ops-hq/career-ops) (MIT). Kairo is independent and not affiliated with it.
